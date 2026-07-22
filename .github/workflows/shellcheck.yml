@@ -9,12 +9,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          show-progress: false
 
       - name: Bash syntax
         run: bash -n vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh lib/*.sh
 
       - name: ShellCheck
-        run: shellcheck vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh lib/*.sh
+        id: shellcheck
+        continue-on-error: true
+        run: |
+          set +e
+          {
+            shellcheck -x -e SC2034 vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh
+            core_rc=$?
+            shellcheck -x -e SC2034,SC2154 lib/*.sh
+            module_rc=$?
+            exit $((core_rc != 0 || module_rc != 0))
+          } >"$RUNNER_TEMP/shellcheck.log" 2>&1
+          rc=$?
+          cat "$RUNNER_TEMP/shellcheck.log"
+          exit "$rc"
+
+      - name: Upload ShellCheck log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shellcheck-log
+          path: ${{ runner.temp }}/shellcheck.log
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Documentation links and removed features
         run: |
@@ -142,3 +166,9 @@ jobs:
           grep -q 'vpsga uninstall' <<<"$manager_help"
           ! grep -q 'vpsga open' <<<"$manager_help"
           ! grep -q 'vpsga serve' <<<"$manager_help"
+
+      - name: Fail if ShellCheck failed
+        if: steps.shellcheck.outcome == 'failure'
+        run: |
+          echo "ShellCheck failed; see the shellcheck-log artifact."
+          exit 1
