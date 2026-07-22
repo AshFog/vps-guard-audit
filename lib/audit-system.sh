@@ -23,6 +23,7 @@ audit_system() {
     [[ -z "$BAD_CRON" ]] \
       && record PASS cron.mode "未发现全局可写的 Cron 文件" "No world-writable cron files" \
       || record FAIL cron.mode "发现全局可写的 Cron 文件" "World-writable cron files detected" "$BAD_CRON"
+
     section "$(t packages)"
     if have dpkg; then
       AUDIT="$(dpkg --audit 2>/dev/null || true)"
@@ -86,10 +87,16 @@ audit_system() {
     else
       record SKIP pkg.updates "系统没有可用的 apt 命令" "apt is unavailable; package update check skipped"
     fi
+
     section "$(t sysctl)"
     check_sysctl() {
       local key="$1" expected="$2" val
-      val="$(sysctl -n "$key" 2>/dev/null || echo unavailable)"
+      val="$(sysctl -n "$key" 2>/dev/null || true)"
+      if [[ -z "$val" ]]; then
+        echo "$key = unavailable"
+        record SKIP "sysctl.$key" "$key 在当前系统中不可读取" "$key is unavailable on this system"
+        return
+      fi
       echo "$key = $val"
       [[ "$val" == "$expected" ]] \
         && record PASS "sysctl.$key" "$key 符合建议值" "$key matches recommended value" "$expected" \
@@ -111,8 +118,9 @@ audit_system() {
     check_sysctl net.ipv4.conf.all.log_martians 1
     check_sysctl net.ipv6.conf.all.accept_redirects 0
     check_sysctl net.ipv6.conf.default.accept_redirects 0
+
     section "$(t files)"
-    for item in "/etc/passwd:644" "/etc/group:644" "/etc/shadow:640" "/etc/gshadow:640" "/etc/ssh/sshd_config:600,644"; do
+    for item in "/etc/passwd:644" "/etc/group:644" "/etc/shadow:600,640" "/etc/gshadow:600,640" "/etc/ssh/sshd_config:600,644"; do
       path="${item%%:*}"; expected="${item#*:}"
       [[ -e "$path" ]] || { record WARN "perm.$path" "$path 不存在" "$path is missing"; continue; }
       mode="$(stat -c %a "$path" 2>/dev/null || true)"
