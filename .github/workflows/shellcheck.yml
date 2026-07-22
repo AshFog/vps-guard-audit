@@ -16,9 +16,29 @@ jobs:
         run: bash -n vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh lib/*.sh
 
       - name: ShellCheck
+        id: shellcheck
+        continue-on-error: true
         run: |
-          shellcheck -x -e SC2034 vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh
-          shellcheck -x -e SC2034,SC2154 lib/*.sh
+          set +e
+          {
+            shellcheck -x -e SC2034 vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh
+            core_rc=$?
+            shellcheck -x -e SC2034,SC2154 lib/*.sh
+            module_rc=$?
+            exit $((core_rc != 0 || module_rc != 0))
+          } >"$RUNNER_TEMP/shellcheck.log" 2>&1
+          rc=$?
+          cat "$RUNNER_TEMP/shellcheck.log"
+          exit "$rc"
+
+      - name: Upload ShellCheck diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shellcheck-diagnostics
+          path: ${{ runner.temp }}/shellcheck.log
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Documentation links and removed features
         run: |
@@ -32,15 +52,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/json"
           set +e
-          sudo ./vps-guard-audit.sh \
-            --lang en \
-            --profile vps \
-            --policy baseline \
-            --no-update-check \
-            --no-history \
-            --format json \
-            --output-dir "$RUNNER_TEMP/json" \
-            --quiet
+          sudo ./vps-guard-audit.sh --lang en --profile vps --policy baseline --no-update-check --no-history --format json --output-dir "$RUNNER_TEMP/json" --quiet
           rc=$?
           set -e
           test "$rc" -ge 0 -a "$rc" -le 2
@@ -91,6 +103,10 @@ jobs:
           latest="$(find "$RUNNER_TEMP/history-reports" -name 'vpsga-*-full.txt' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)"
           grep -q 'Compared with the previous audit' "$latest"
 
+      - name: Fail on ShellCheck diagnostics
+        if: steps.shellcheck.outcome == 'failure'
+        run: exit 1
+
   installation-tests:
     runs-on: ubuntu-latest
     steps:
@@ -99,20 +115,41 @@ jobs:
           show-progress: false
 
       - name: Clean system installation
+        id: clean_install
+        continue-on-error: true
         run: |
-          set -euxo pipefail
-          sudo rm -rf /usr/local/lib/vps-guard-audit
-          sudo rm -f /usr/local/bin/vpsga /usr/local/sbin/vps-guard-audit
-          sudo ./install.sh
-          ls -la /usr/local/lib/vps-guard-audit
-          ls -la /usr/local/lib/vps-guard-audit/current/
-          test -x /usr/local/bin/vpsga
-          test -L /usr/local/lib/vps-guard-audit/current
-          test "$(/usr/local/bin/vpsga --version)" = "4.4.0"
-          help_output="$(/usr/local/bin/vpsga --help)"
-          grep -q 'vpsga \[options\]' <<<"$help_output"
-          ! grep -q 'sudo ./vps-guard-audit.sh' <<<"$help_output"
-          /usr/local/bin/vpsga doctor
+          set +e
+          {
+            set -euxo pipefail
+            sudo rm -rf /usr/local/lib/vps-guard-audit
+            sudo rm -f /usr/local/bin/vpsga /usr/local/sbin/vps-guard-audit
+            sudo ./install.sh
+            ls -la /usr/local/lib/vps-guard-audit
+            ls -la /usr/local/lib/vps-guard-audit/current/
+            test -x /usr/local/bin/vpsga
+            test -L /usr/local/lib/vps-guard-audit/current
+            test "$(/usr/local/bin/vpsga --version)" = "4.4.0"
+            help_output="$(/usr/local/bin/vpsga --help)"
+            grep -q 'vpsga \[options\]' <<<"$help_output"
+            ! grep -q 'sudo ./vps-guard-audit.sh' <<<"$help_output"
+            /usr/local/bin/vpsga doctor
+          } >"$RUNNER_TEMP/clean-install.log" 2>&1
+          rc=$?
+          cat "$RUNNER_TEMP/clean-install.log"
+          exit "$rc"
+
+      - name: Upload clean-install diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clean-install-diagnostics
+          path: ${{ runner.temp }}/clean-install.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Stop after clean-install failure
+        if: steps.clean_install.outcome == 'failure'
+        run: exit 1
 
       - name: Legacy current-directory migration regression test
         run: |
