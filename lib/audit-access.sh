@@ -65,6 +65,7 @@ audit_access() {
     else
       record FAIL ssh.missing "未找到 sshd" "sshd binary not found"
     fi
+
     section "$(t f2b)"
     F2B_FAILURE_RECORDED=0
     alternative_guard=""
@@ -105,6 +106,7 @@ audit_access() {
       record WARN f2b.absent "未检测到暴力破解防护工具" "No brute-force protection tool detected" "" \
         "公网 SSH 使用密码认证时，建议启用 Fail2ban、CrowdSec 或 sshguard。" "When public SSH accepts passwords, enable Fail2ban, CrowdSec or sshguard."
     fi
+
     section "$(t accounts)"
     UID0="$(awk -F: '$3==0{print $1}' /etc/passwd | xargs)"
     [[ "$UID0" == "$EXPECTED_UID0_USERS" ]] \
@@ -136,6 +138,7 @@ audit_access() {
         awk '!/^[[:space:]]*(#|$)/ {print $1}' "$key" 2>/dev/null | sort | uniq -c | sed 's/^/key type: /' || true
       fi
     done </etc/passwd
+
     section "$(t logins)"
     LOGIN_SOURCE=""
     SUCCESS_LOGINS=""
@@ -147,19 +150,32 @@ audit_access() {
       LOGIN_SOURCE="last"
     fi
     echo "--- successful (${LOGIN_SOURCE:-unavailable}) ---"
-    if [[ -n "$SUCCESS_LOGINS" ]]; then printf '%s\n' "$SUCCESS_LOGINS" | redact_stream; else record SKIP login.success "没有可用的成功登录记录工具或记录" "No successful-login records or compatible tool available"; fi
+    if [[ -n "$SUCCESS_LOGINS" ]]; then
+      printf '%s\n' "$SUCCESS_LOGINS" | redact_stream
+    else
+      record SKIP login.success "没有可用的成功登录记录工具或记录" "No successful-login records or compatible tool available"
+    fi
 
     echo "--- failed ---"
     FAILED_LOGINS=""
+    FAILED_SOURCE=""
     if have lastb; then
       FAILED_LOGINS="$(lastb -a -n "$LOGIN_LINES" 2>/dev/null || true)"
+      FAILED_SOURCE="lastb"
     elif have journalctl; then
       FAILED_LOGINS="$(journalctl -u ssh.service -u sshd.service --since '-30 days' --no-pager 2>/dev/null | grep -Ei 'Failed password|Invalid user|authentication failure' | tail -n "$LOGIN_LINES" || true)"
-      have lslogins && lslogins --failed 2>/dev/null | head -n "$LOGIN_LINES" || true
+      FAILED_SOURCE="journalctl"
+      if [[ -z "$FAILED_LOGINS" ]] && have lslogins; then
+        FAILED_LOGINS="$(lslogins --failed 2>/dev/null | head -n "$LOGIN_LINES" || true)"
+        FAILED_SOURCE="lslogins"
+      fi
     else
       record SKIP login.failed "缺少 lastb/journalctl，跳过失败登录记录" "lastb and journalctl are unavailable; failed-login history skipped"
     fi
-    [[ -n "$FAILED_LOGINS" ]] && printf '%s\n' "$FAILED_LOGINS" | redact_stream || record INFO login.failed.none "近期未读取到失败登录记录" "No recent failed-login records were read"
+    [[ -n "$FAILED_SOURCE" ]] && echo "failed-login source: $FAILED_SOURCE"
+    [[ -n "$FAILED_LOGINS" ]] \
+      && printf '%s\n' "$FAILED_LOGINS" | redact_stream \
+      || record INFO login.failed.none "近期未读取到失败登录记录" "No recent failed-login records were read"
 
     if [[ -n "$TRUSTED_LOGIN_IPS" && -n "$SUCCESS_LOGINS" ]]; then
       mapfile -t seen_ips < <(awk '$1!="reboot" && $NF ~ /^[0-9a-fA-F:.]+$/ {print $NF}' <<<"$SUCCESS_LOGINS" | sort -u)
