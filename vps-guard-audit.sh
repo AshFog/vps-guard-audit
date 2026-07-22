@@ -2,13 +2,13 @@
 # VPS Guard Audit
 # Interactive bilingual, read-only security audit for new VPS users.
 # Supported: Ubuntu 26.04/24.04/22.04 LTS and Debian 13/12/11.
-# Version: 4.2.1
+# Version: 4.3.0
 
 set -uo pipefail
 IFS=$'\n\t'
 export LC_ALL=C LANG=C
 
-VERSION="4.2.1"
+VERSION="4.3.0"
 LANGUAGE=""
 OUTPUT_DIR="${PWD}"
 FORMAT="both"
@@ -33,6 +33,11 @@ declare -a RESULTS=()
 declare -a WARNINGS=()
 declare -a FAILURES=()
 declare -a RECOMMENDATIONS=()
+declare -a FINDING_IDS=()
+declare -a FINDING_LEVELS=()
+declare -a FINDING_TITLES=()
+declare -a FINDING_DETAILS=()
+declare -a FINDING_RECOMMENDATIONS=()
 
 usage() {
   cat <<'EOF'
@@ -120,13 +125,12 @@ EOF
     esac
   done
 }
-
 [[ -z "$LANGUAGE" ]] && choose_language
 case "$LANGUAGE" in zh|en) ;; *) echo "Invalid language: $LANGUAGE" >&2; exit 64 ;; esac
 
 declare -A ZH EN
-ZH[title]="VPS 安全审计报告"
-EN[title]="VPS Security Audit Report"
+ZH[title]="VPS Guard Audit 完整报告"
+EN[title]="VPS Guard Audit Full Report"
 ZH[readonly]="默认只读：不会修改防火墙、SSH、用户或系统配置；仅在使用 --refresh-package-index 时刷新 APT 索引"
 EN[readonly]="Read-only by default: no firewall, SSH, user or system settings are changed; APT indexes refresh only with --refresh-package-index"
 ZH[start]="即将开始全面安全检测"
@@ -161,18 +165,18 @@ ZH[proxy]="14. 代理、VPN 与高风险辅助脚本"
 EN[proxy]="14. Proxy, VPN and risky helper scripts"
 ZH[rootkit]="15. Rootkit 扫描器状态"
 EN[rootkit]="15. Rootkit scanner status"
-ZH[summary]="16. 最终风险报告与修复建议"
-EN[summary]="16. Final risk report and recommendations"
+ZH[summary]="16. 检测总结与下一步建议"
+EN[summary]="16. Summary and next steps"
 ZH[reports]="报告保存位置"
 EN[reports]="Report location"
 ZH[done]="检测完成"
 EN[done]="Audit completed"
-ZH[low]="低风险：未发现明显高危问题"
-EN[low]="LOW: no obvious high-risk findings"
-ZH[medium]="中等风险：存在需要人工确认或加固的项目"
-EN[medium]="MEDIUM: warnings require review or hardening"
-ZH[high]="高风险：存在需要尽快处理的问题"
-EN[high]="HIGH: remediation is required"
+ZH[low]="总体情况良好：没有发现明确的高危问题"
+EN[low]="Overall status looks good: no clear high-risk issue was found"
+ZH[medium]="没有发现明确的高危问题，但有一些项目建议确认或改进"
+EN[medium]="No clear high-risk issue was found, but some items should be reviewed or improved"
+ZH[high]="发现需要尽快处理的问题"
+EN[high]="Issues requiring prompt attention were found"
 
 t() {
   local key="$1"
@@ -222,6 +226,11 @@ record() {
     SKIP) SKIP=$((SKIP+1)) ;;
   esac
   [[ -n "$rec" ]] && RECOMMENDATIONS+=("$rec")
+  FINDING_IDS+=("$id")
+  FINDING_LEVELS+=("$level")
+  FINDING_TITLES+=("$title")
+  FINDING_DETAILS+=("$detail")
+  FINDING_RECOMMENDATIONS+=("$rec")
   printf '[%s] %s' "$level" "$title"
   [[ -n "$detail" ]] && printf ' — %s' "$detail"
   printf '\n'
@@ -308,7 +317,7 @@ load_audit_modules() {
     tmp_lib="$(mktemp -d)"
     MODULE_TMP_DIR="$tmp_lib"
     base_url="${VPS_GUARD_BASE_URL:-https://raw.githubusercontent.com/AshFog/vps-guard-audit/main/lib}"
-    for module in audit-platform.sh audit-access.sh audit-system.sh audit-containers.sh audit-summary.sh; do
+    for module in audit-platform.sh audit-access.sh audit-system.sh audit-containers.sh report-guidance-zh.sh report-guidance-en.sh report-guidance.sh audit-summary.sh; do
       curl -fsSL "$base_url/$module" -o "$tmp_lib/$module" || {
         echo "Failed to download module: $module" >&2
         exit 69
@@ -316,7 +325,7 @@ load_audit_modules() {
     done
     lib_dir="$tmp_lib"
   fi
-  for module in audit-platform.sh audit-access.sh audit-system.sh audit-containers.sh audit-summary.sh; do
+  for module in audit-platform.sh audit-access.sh audit-system.sh audit-containers.sh report-guidance-zh.sh report-guidance-en.sh report-guidance.sh audit-summary.sh; do
     # shellcheck disable=SC1090
     source "$lib_dir/$module"
   done
