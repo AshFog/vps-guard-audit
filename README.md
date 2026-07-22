@@ -1,8 +1,8 @@
 # VPS Guard Audit
 
-VPS Guard Audit 是一款双语、默认只读的 Ubuntu 与 Debian 安全审计工具。它不会自动修改 SSH、防火墙、用户、服务或系统配置。报告会用自然语言解释检测结果，并生成适合提交给可信 AI 助手的脱敏副本。
+**English** | [简体中文](README.zh-CN.md)
 
-VPS Guard Audit is a bilingual, read-only-by-default security audit tool for Ubuntu and Debian. It does not automatically modify SSH, firewalls, users, services, or system configuration. Reports explain findings in plain language and include a redacted copy intended for a trusted AI assistant.
+VPS Guard Audit is a bilingual, read-only-by-default security audit tool for Ubuntu and Debian. It does not automatically modify SSH, firewalls, users, services, or system configuration. Reports explain findings in plain language and include a more strongly redacted copy intended for analysis by a trusted AI assistant.
 
 ## Supported systems
 
@@ -15,7 +15,7 @@ Validated releases:
 - Debian 12
 - Debian 11
 
-The audit automatically detects `vps`, `server`, `desktop`, and `container` profiles.
+The audit automatically detects `vps`, `server`, `desktop`, and `container` profiles. Other Ubuntu or Debian releases may run, but the report warns when they are outside the validated matrix.
 
 ## Quick start
 
@@ -33,8 +33,9 @@ It will:
 2. download the complete project;
 3. install or update VPS Guard Audit under `/usr/local/lib/vps-guard-audit`;
 4. create the global command `/usr/local/bin/vpsga`;
-5. immediately run the audit;
-6. save reports in the directory where the command was launched.
+5. verify the installation;
+6. immediately run the audit;
+7. save reports in the directory where the command was launched.
 
 ### Every later run
 
@@ -44,25 +45,17 @@ From any directory, use only:
 vpsga
 ```
 
-A non-root user will be prompted for the sudo password automatically. Do not add `sudo` unless you have a specific reason.
+A non-root user will be prompted for the sudo password automatically. Reports are returned to the invoking user when the output directory belongs to that user.
 
-### Important command distinction
-
-This is the normal installed command:
-
-```bash
-vpsga
-```
-
-Do **not** run this from an arbitrary directory:
+Do not run this from an arbitrary directory:
 
 ```bash
 sudo ./vps-guard-audit.sh
 ```
 
-`./` means “find this file in the current directory.” That command works only after cloning the source repository and changing into its directory. It is not the one-command user experience and is not needed after installation.
+`./` means “find this file in the current directory.” That form works only after cloning the source repository and changing into its directory. It is not the normal installed workflow.
 
-Check the installation with:
+## Verify the installation
 
 ```bash
 command -v vpsga
@@ -76,22 +69,18 @@ Expected command path:
 /usr/local/bin/vpsga
 ```
 
-If `vpsga` is not found, run the one-command installer again.
+If `vpsga` is unavailable or `vpsga doctor` reports a broken `current` path, run the one-command installer again. The installer migrates older development layouts where `current` was accidentally created as a real directory.
 
-## Updating
-
-After installation:
+## Update or uninstall
 
 ```bash
 vpsga update
+vpsga uninstall
 ```
 
-Then verify:
+`vpsga update` downloads the current repository version, validates the staged files, installs them, and runs a post-install health check.
 
-```bash
-vpsga --version
-vpsga doctor
-```
+`vpsga uninstall` requires explicit confirmation and asks whether audit history should be retained.
 
 ## Report files
 
@@ -105,7 +94,7 @@ vpsga-20260722-153045.json
 
 ### Full TXT
 
-`*-full.txt` contains the complete technical evidence, natural-language conclusion, warnings, cautions, history comparison, and AI prompt.
+`*-full.txt` contains the complete technical evidence, natural-language conclusion, findings, cautions, history comparison, and a prompt for requesting an AI-assisted remediation plan.
 
 ### AI TXT
 
@@ -127,7 +116,7 @@ The JSON file contains structured findings for history comparison, automation, a
 
 ## History comparison
 
-By default, VPS Guard Audit stores a compact state under:
+By default, VPS Guard Audit stores compact state files under:
 
 ```text
 /var/lib/vps-guard-audit/history/
@@ -147,28 +136,19 @@ Disable history for one run:
 vpsga --no-history
 ```
 
-## Management commands
-
-```bash
-vpsga doctor
-vpsga update
-vpsga uninstall
-```
-
-- `vpsga doctor` checks the installed executable, version, modules, current-release link, and PATH command.
-- `vpsga update` downloads and installs the current repository version.
-- `vpsga uninstall` removes the installed program and asks whether history should be kept.
-
-## Common audit commands
+## Common commands
 
 ```bash
 vpsga
 vpsga --lang en
-vpsga --output-dir /root/audit-reports
+vpsga --output-dir /home/user/audit-reports
 vpsga --rootkit-check
 vpsga --no-history
 vpsga --version
 vpsga --help
+vpsga doctor
+vpsga update
+vpsga uninstall
 ```
 
 ## Options
@@ -219,6 +199,7 @@ By default, the audit reads the existing APT cache and does **not** run `apt-get
 - UFW, firewalld, nftables, and iptables backends
 - SSH configuration and login policy
 - Fail2ban, CrowdSec, and sshguard status
+- Debian 13 `wtmpdb`, `last`, `lastb`, journal, and `lslogins` fallbacks
 - Login history and suspicious sources
 - UID 0 accounts, passwords, sudo, and SSH-key summaries
 - Failed services, cron jobs, and systemd timers
@@ -229,9 +210,19 @@ By default, the audit reads the existing APT cache and does **not** run `apt-get
 - Suspicious processes, deleted executables, and temporary executables
 - Proxy, VPN, miner, scanner, and optional rootkit checks
 
-## Advanced source usage
+## Optional configuration
 
-The source form is for contributors or users who deliberately clone the repository:
+```bash
+cp config/audit.conf.example config/audit.conf
+nano config/audit.conf
+sudo vpsga --config config/audit.conf
+```
+
+The configuration file can define trusted login IPs, intentional custom ports, host profile, audit policy, and output limits.
+
+## Source and contributor workflow
+
+Normal users do not need to clone the repository. Contributors can use:
 
 ```bash
 git clone https://github.com/AshFog/vps-guard-audit.git
@@ -245,8 +236,6 @@ Only while inside that cloned directory can the raw source script be run directl
 ```bash
 sudo ./vps-guard-audit.sh
 ```
-
-Normal users should use `vpsga` instead.
 
 ## Exit codes
 
@@ -269,12 +258,14 @@ No shell script can prove that a host is clean or that an all-interface listener
 
 AI-generated remediation steps must also be reviewed. Before SSH, firewall, Docker, networking, or reboot changes, preserve the current session, verify backups or snapshots, and ensure console or rescue access is available.
 
-## Development
+## Development checks
 
 ```bash
 bash -n vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh lib/*.sh
 shellcheck vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh lib/*.sh
 ```
+
+GitHub Actions validates syntax, ShellCheck, report bundles, history comparison, clean installation, legacy-layout migration, installed-command execution, and report ownership.
 
 ## License
 
