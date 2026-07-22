@@ -1,8 +1,8 @@
 # VPS Guard Audit
 
-面向 VPS 新手的双语、交互式、只读安全审计工具。目标是帮助普通用户尽早发现错误配置、弱 SSH 设置、异常账户、陌生登录、暴露端口、危险持久化和常见挖矿木马特征，降低 VPS 被滥用为“肉鸡”的风险。
+面向 VPS 新手的双语、交互式、只读安全审计工具。它帮助发现错误配置、弱 SSH 设置、异常账户、陌生登录、暴露端口、防火墙绕过、危险持久化以及常见挖矿木马特征。
 
-A bilingual, interactive, read-only VPS security audit for beginners. It helps detect weak SSH settings, unexpected accounts, unfamiliar logins, exposed ports, persistence, unsafe permissions and common miner/scanner indicators.
+A bilingual, interactive, read-only VPS security audit for beginners. It checks exposed services, firewall bypasses, SSH hardening, unexpected accounts, persistence, unsafe permissions and common miner/scanner indicators.
 
 ## Supported systems
 
@@ -15,11 +15,23 @@ Validated releases:
 - Debian 12
 - Debian 11
 
-Other Ubuntu/Debian versions may run, but the report will clearly warn that they are outside the validated support matrix.
+Other Ubuntu/Debian versions may run, but the report warns when they are outside the validated matrix.
 
-## One-command experience
+## One-command run
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/AshFog/vps-guard-audit/main/bootstrap.sh | bash
+```
+
+The bootstrap downloads the audit to a temporary file, reads the interactive language choice from `/dev/tty`, runs with root privileges, and removes the temporary file afterward.
+
+For higher assurance, use a release tag or commit SHA instead of the moving `main` branch.
+
+## Local run
+
+```bash
+git clone https://github.com/AshFog/vps-guard-audit.git
+cd vps-guard-audit
 sudo ./vps-guard-audit.sh
 ```
 
@@ -30,63 +42,64 @@ The script first asks:
 2) English
 ```
 
-It then runs the full read-only audit, prints a detailed report in the selected language, and shows the saved TXT and JSON report paths.
+It prints a detailed report and saves TXT and JSON copies.
 
 ## Safe by design
 
-The script does not:
+The normal audit does not:
 
 - install or remove packages
-- edit SSH
+- edit SSH or sysctl settings
 - add or delete firewall rules
-- change passwords or keys
+- change passwords or SSH keys
 - enable or disable services
 - delete logs or files
-- apply sysctl settings
 
-The normal run is inspection-only. `--rootkit-check` only launches `rkhunter` or `chkrootkit` when they are already installed.
+`--rootkit-check` only launches `rkhunter` or `chkrootkit` when already installed.
 
-## Checks
+## Major checks
 
-- Operating-system support and AppArmor
-- Public TCP/UDP listeners
-- UFW and iptables default policies
-- SSH key/password/root-login security
-- Fail2ban status
-- UID 0 accounts, empty password hashes and sudo
-- SSH key fingerprints and permissions
+- OS support and AppArmor
+- Public TCP/UDP listeners, including wildcard IPv4 and IPv6 bindings
+- Public CUPS, Docker API and common database ports
+- UFW status, boot enablement and default-deny policy
+- Direct `iptables ACCEPT` rules that may bypass UFW
+- UFW rules with no matching active public listener
+- SSH password, key, root-login, forwarding and retry settings
+- Fail2ban status with compact output
+- UID 0 accounts, empty password hashes, sudo and SSH key fingerprints
 - Successful and failed login history
-- Enabled services, cron and systemd timers
+- Enabled services, failed units, cron and systemd timers
 - Pending package updates and unattended-upgrades
 - Kernel/network hardening values
-- Sensitive file permissions and world-writable files
-- SUID/SGID inventory
+- Sensitive permissions, world-writable files and SUID/SGID inventory
 - Docker privileged containers and host networking
 - Deleted executables still in use
-- Recent executable files in `/tmp`, `/var/tmp`, `/dev/shm`
+- Recent executable files in temporary directories
 - Common miner/scanner process names
 - Proxy/VPN services and risky helper scripts
 - Optional existing rootkit scanners
 
-## Install
+## Install system-wide
 
 ```bash
-git clone https://github.com/YOUR_NAME/vps-guard-audit.git
-cd vps-guard-audit
 sudo ./install.sh
 sudo vps-guard-audit
 ```
 
-## Direct download
+## Options
 
-For real deployments, pin a release tag or commit SHA rather than a moving main branch.
-
-```bash
-curl -fsSLo vps-guard-audit.sh \
-  https://raw.githubusercontent.com/YOUR_NAME/vps-guard-audit/main/vps-guard-audit.sh
-
-chmod +x vps-guard-audit.sh
-sudo ./vps-guard-audit.sh
+```text
+--lang zh|en
+--output-dir DIR
+--format text|json|both
+--config FILE
+--login-lines N
+--no-update-check
+--rootkit-check
+--quiet
+-h, --help
+-v, --version
 ```
 
 ## Optional configuration
@@ -97,7 +110,7 @@ nano config/audit.conf
 sudo ./vps-guard-audit.sh --config config/audit.conf
 ```
 
-Configuration is optional and contains no personal defaults.
+Use the configuration file to mark trusted login IPs and intentionally exposed custom ports.
 
 ## Exit codes
 
@@ -110,16 +123,20 @@ Configuration is optional and contains no personal defaults.
 | 66 | Unreadable config |
 | 77 | Root required |
 
+A warning or failure exit code is an audit result, not a script crash. Do not append `exit $?` when running it inside an active SSH shell.
+
 ## Security limitations
 
-A script cannot prove that a server is clean. A sophisticated attacker may hide processes, alter logs or compromise the kernel. Unknown successful logins, unexpected UID 0 accounts, malicious processes or unexplained persistence should be treated seriously: isolate the VPS, rotate credentials from a clean device and consider rebuilding from a trusted image.
+No shell script can prove that a server is clean. A sophisticated attacker may hide processes, alter logs or compromise the kernel. Unknown successful logins, unexpected UID 0 accounts, malicious processes or unexplained persistence should be treated seriously: isolate the VPS, rotate credentials from a clean device and consider rebuilding from a trusted image.
 
 ## Development
 
 ```bash
-bash -n vps-guard-audit.sh
-shellcheck vps-guard-audit.sh install.sh
+bash -n vps-guard-audit.sh bootstrap.sh install.sh
+shellcheck vps-guard-audit.sh bootstrap.sh install.sh
 ```
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ## License
 
