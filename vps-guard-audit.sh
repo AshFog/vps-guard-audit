@@ -43,7 +43,10 @@ declare -a FINDING_RECOMMENDATIONS=()
 usage() {
   cat <<'EOF_USAGE'
 Usage:
-  sudo ./vps-guard-audit.sh
+  vpsga [options]
+
+First installation:
+  curl -fsSL https://raw.githubusercontent.com/AshFog/vps-guard-audit/main/bootstrap.sh | bash
 
 Options:
   --lang zh|en
@@ -91,8 +94,14 @@ case "$POLICY" in baseline|strict) ;; *) echo "Invalid policy: $POLICY" >&2; exi
 [[ "$LOGIN_LINES" =~ ^[0-9]+$ ]] || { echo "--login-lines must be an integer" >&2; exit 64; }
 
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-  echo "请使用 root 权限运行 / Run as root:"
-  echo "sudo ./vps-guard-audit.sh"
+  if command -v vpsga >/dev/null 2>&1; then
+    echo "请直接运行 vpsga，它会自动请求 sudo 权限。" >&2
+    echo "Run vpsga directly; it requests sudo automatically." >&2
+  else
+    echo "请先运行官方一键安装命令：" >&2
+    echo "Install first with the official one-command installer:" >&2
+    echo "curl -fsSL https://raw.githubusercontent.com/AshFog/vps-guard-audit/main/bootstrap.sh | bash" >&2
+  fi
   exit 77
 fi
 
