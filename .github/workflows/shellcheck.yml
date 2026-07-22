@@ -46,7 +46,7 @@ jobs:
           test -s README.zh-CN.md
           grep -q '\[简体中文\](README.zh-CN.md)' README.md
           grep -q '\[English\](README.md)' README.zh-CN.md
-          ! grep -R -nE 'vpsga (open|serve)|HTML_REPORT|generate_html_report' -- README.md README.zh-CN.md vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh lib .github
+          ! grep -R -nE 'vpsga (open|serve)|HTML_REPORT|generate_html_report' -- README.md README.zh-CN.md vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh lib
 
       - name: Non-mutating JSON smoke test
         run: |
