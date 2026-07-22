@@ -1,5 +1,36 @@
 # Changelog
 
+## 4.4.0 — 2026-07-22
+
+Report bundle, history comparison, and local HTML viewer release.
+
+### Added
+
+- Timestamped audit bundles using `vpsga-YYYYMMDD-HHMMSS` as the shared base name.
+- A complete `*-full.txt` report.
+- A stronger `*-ai.txt` redacted report for submission to trusted AI assistants.
+- A standalone HTML report with summary cards, plain-language findings, cautions, history comparison, matching-file links, dark mode, and collapsible technical output.
+- Automatic comparison with the previous audit, showing new, resolved, and severity-changed findings.
+- Up to 30 compact history state files under `/var/lib/vps-guard-audit/history/`.
+- `--no-history` for audits that should not read or save comparison state.
+- `vpsga open` for opening the newest HTML report on a local graphical host.
+- `vpsga serve` for a private report server bound to `127.0.0.1`.
+- `vpsga doctor`, `vpsga update`, and `vpsga uninstall` management commands.
+- CI coverage for report bundles, history comparison, system installation, and manager commands.
+
+### Changed
+
+- Report names no longer contain the hostname or language; the generation timestamp identifies the matching bundle.
+- The AI guidance now tells users to prefer the `*-ai.txt` report over the complete report.
+- The system installer now includes the report manager and the new report-output module.
+- README introduction and documentation were simplified in both Chinese and English.
+
+### Security
+
+- The AI report maps or removes some hostnames, usernames, container names, domains, IPv4 addresses, email addresses, MAC addresses, and SSH fingerprints.
+- The local HTML server never binds to a public interface; remote SSH users must use port forwarding.
+- Automatic redaction remains best-effort, and reports must still be reviewed before sharing.
+
 ## 4.3.0 — 2026-07-22
 
 Beginner-report release focused on clarity, safe next steps, AI-assisted remediation, and easier repeated use.
