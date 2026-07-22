@@ -78,5 +78,5 @@ jobs:
           test -x /usr/local/bin/vpsga
           test "$(vpsga --version)" = "4.4.0"
           vpsga doctor
-          vpsga-manager-help="$(/usr/local/lib/vps-guard-audit/current/vpsga-manager.sh --help)"
-          grep -q 'vpsga serve' <<<"$vpsga-manager-help"
+          manager_help="$(/usr/local/lib/vps-guard-audit/current/vpsga-manager.sh --help)"
+          grep -q 'vpsga serve' <<<"$manager_help"
