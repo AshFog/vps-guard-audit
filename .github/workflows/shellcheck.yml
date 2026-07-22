@@ -44,18 +44,16 @@ jobs:
             test "$(find "$RUNNER_TEMP/$dir" -maxdepth 1 -name 'vpsga-*-full.txt' | wc -l)" -eq 1
             test "$(find "$RUNNER_TEMP/$dir" -maxdepth 1 -name 'vpsga-*-ai.txt' | wc -l)" -eq 1
             test "$(find "$RUNNER_TEMP/$dir" -maxdepth 1 -name 'vpsga-*.json' | wc -l)" -eq 1
-            test "$(find "$RUNNER_TEMP/$dir" -maxdepth 1 -name 'vpsga-*.html' | wc -l)" -eq 1
+            test "$(find "$RUNNER_TEMP/$dir" -maxdepth 1 -name 'vpsga-*.html' | wc -l)" -eq 0
           done
           zh_full="$(find "$RUNNER_TEMP/zh" -name 'vpsga-*-full.txt' -print -quit)"
           zh_ai="$(find "$RUNNER_TEMP/zh" -name 'vpsga-*-ai.txt' -print -quit)"
           en_full="$(find "$RUNNER_TEMP/en" -name 'vpsga-*-full.txt' -print -quit)"
           en_ai="$(find "$RUNNER_TEMP/en" -name 'vpsga-*-ai.txt' -print -quit)"
-          zh_html="$(find "$RUNNER_TEMP/zh" -name 'vpsga-*.html' -print -quit)"
           grep -q '检测总结与下一步建议' "$zh_full"
           grep -q 'AI 脱敏报告' "$zh_ai"
           grep -q 'Summary and next steps' "$en_full"
           grep -q 'AI-Safe Report' "$en_ai"
-          grep -q '<!doctype html>' "$zh_html"
       - name: History comparison smoke test
         run: |
           mkdir -p "$RUNNER_TEMP/history-reports" "$RUNNER_TEMP/history-state"
@@ -79,4 +77,7 @@ jobs:
           test "$(vpsga --version)" = "4.4.0"
           vpsga doctor
           manager_help="$(/usr/local/lib/vps-guard-audit/current/vpsga-manager.sh --help)"
-          grep -q 'vpsga serve' <<<"$manager_help"
+          grep -q 'vpsga update' <<<"$manager_help"
+          grep -q 'vpsga uninstall' <<<"$manager_help"
+          ! grep -q 'vpsga open' <<<"$manager_help"
+          ! grep -q 'vpsga serve' <<<"$manager_help"
