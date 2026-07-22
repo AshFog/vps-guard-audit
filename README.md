@@ -1,8 +1,8 @@
 # VPS Guard Audit
 
-Debian/Ubuntu 主机用户的双语安全审计工具。它默认只读，不会自动修改 SSH、防火墙、用户、服务或系统配置。除了完整技术检查，报告还会用更自然的语言说明发现了什么、为什么值得关注、下一步可以怎么确认，并附带一个可直接提交给可信 AI 助手的分析模板。
+VPS Guard Audit 是一款双语、默认只读的 Ubuntu 与 Debian 安全审计工具。它不会自动修改 SSH、防火墙、用户、服务或系统配置。报告会用自然语言说明发现了什么、为什么值得关注、下一步如何确认，并生成适合提交给可信 AI 助手的脱敏副本。
 
-Debian/Ubuntu hosts. It is read-only by default and does not automatically modify SSH, firewalls, users, services, or system configuration. In addition to technical evidence, the TXT report explains findings in plain language, suggests safe next steps, and includes a ready-to-use prompt for a trusted AI assistant.
+VPS Guard Audit is a bilingual, read-only-by-default security audit tool for Ubuntu and Debian. It does not automatically modify SSH, firewalls, users, services, or system configuration. Reports explain findings in plain language and include a redacted copy designed for submission to a trusted AI assistant.
 
 ## Supported systems
 
@@ -17,80 +17,143 @@ Validated releases:
 
 The audit auto-detects `vps`, `server`, `desktop`, and `container` profiles. Other Ubuntu/Debian versions may run, but the report warns when they are outside the validated matrix.
 
-## One-command run and installation
+## One-command installation
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AshFog/vps-guard-audit/main/bootstrap.sh | bash
 ```
 
-The first one-command run:
+The first run:
 
 1. reads the bilingual language menu directly from `/dev/tty`;
 2. downloads the complete repository archive once;
-3. installs or updates the audit under `/usr/local/lib/vps-guard-audit`;
-4. creates the global command `/usr/local/bin/vpsga`;
+3. installs or updates the program under `/usr/local/lib/vps-guard-audit`;
+4. creates `/usr/local/bin/vpsga`;
 5. runs the audit and saves reports in the directory where the command was launched;
-6. removes the downloaded temporary archive and extraction directory.
+6. removes the temporary archive and extraction directory.
 
-After the first run, start the audit from any directory with:
+After installation, run the audit from any directory:
 
 ```bash
 vpsga
 ```
 
-When run by a non-root user, `vpsga` uses `sudo` because several security checks require root access. Reports are saved in the current directory unless `--output-dir` is supplied.
+A non-root user is automatically prompted through `sudo`. Reports are saved in the current directory unless `--output-dir` is supplied.
 
-Running the official one-command installer again updates the installed `vpsga` files to the current `main` branch and then starts a new audit.
-
-For higher assurance, pin a release tag or commit SHA instead of the moving `main` branch.
-
-## Local run
+Update the installed program later with:
 
 ```bash
-git clone https://github.com/AshFog/vps-guard-audit.git
-cd vps-guard-audit
-sudo ./vps-guard-audit.sh
+vpsga update
 ```
 
-The script asks:
+## Report names
+
+Version 4.4 uses short, timestamped names:
 
 ```text
-1) 中文
-2) English
+vpsga-20260722-153045-full.txt
+vpsga-20260722-153045-ai.txt
+vpsga-20260722-153045.json
+vpsga-20260722-153045.html
 ```
 
-## Reports
+The four files share the same generation time, making one audit bundle easy to identify.
 
-A normal run generates:
+### Full TXT
+
+`*-full.txt` contains the complete technical evidence, natural-language conclusion, findings, cautions, history comparison, and AI prompt.
+
+### AI TXT
+
+`*-ai.txt` is generated from the full report with stronger automatic redaction. It replaces some:
+
+- hostnames and FQDNs;
+- non-root login usernames;
+- Docker container names;
+- configured web domains;
+- IPv4 addresses;
+- email and MAC addresses;
+- SSH fingerprints.
+
+Automatic redaction cannot guarantee that every custom identifier or credential is removed. Review the file before sharing it. Never submit passwords, private keys, API keys, access tokens, cookies, or other credentials.
+
+### JSON
+
+The JSON file contains structured findings for automation and future integrations.
+
+### HTML
+
+The HTML file is a standalone report with:
+
+- summary cards;
+- plain-language findings;
+- warnings and cautions;
+- comparison with the previous audit;
+- links to the matching TXT and JSON files;
+- collapsible full technical output;
+- automatic light and dark appearance.
+
+At the end of an audit, the terminal prints a `file://` address. On a computer with a local graphical browser, open the newest report with:
+
+```bash
+vpsga open
+```
+
+A `file://` path on a remote VPS cannot normally be opened directly by a browser on your own computer because the file exists on the server. For an SSH session, start a private report server:
+
+```bash
+vpsga serve
+```
+
+It binds only to `127.0.0.1` and prints a URL such as:
 
 ```text
-vps-guard-audit-HOST-TIME-LANG.txt
-vps-guard-audit-HOST-TIME-LANG.json
+http://127.0.0.1:8765/vpsga-20260722-153045.html
 ```
 
-The TXT file contains:
+Create an SSH tunnel from your own computer:
 
-- the complete technical evidence collected by the audit;
-- a beginner-friendly conclusion;
-- findings separated into prompt attention, owner confirmation, and suggested improvements;
-- plain-language explanations, suggested next steps, and cautions for disruptive changes;
-- a privacy reminder and a copy-ready AI analysis prompt.
+```bash
+ssh -L 8765:127.0.0.1:8765 USER@SERVER
+```
 
-The JSON file contains structured findings for tools, automation, and comparison.
+Then click or open the printed URL locally. The report server is not exposed to the public Internet. Press `Ctrl+C` to stop it.
 
-## Using AI with the report
+A different directory or port can be supplied:
 
-The audit does not automatically repair the host. After reviewing the TXT file for privacy, you may submit it to a trusted AI assistant and ask for a system-specific remediation plan.
+```bash
+vpsga serve /root/reports 8877
+```
 
-For better guidance, also describe:
+## History comparison
 
-- what the server is intended to run;
-- the active SSH port;
-- which ports, containers, proxies, and websites were intentionally deployed;
-- whether provider console, VNC, serial console, or rescue access is available;
-- whether changes can be scheduled during a maintenance window.
+By default, the audit stores a small structured state file under:
 
-Never share passwords, SSH private keys, API keys, access tokens, cookies, or other credentials. The report redacts some identifiers by default, but it should still be reviewed before sharing.
+```text
+/var/lib/vps-guard-audit/history/
+```
+
+The next audit reports:
+
+- new warnings or failures;
+- findings that have been resolved;
+- findings whose severity changed.
+
+Only the latest 30 state files are retained. Use `--no-history` for a run that should not read or save history.
+
+## Management commands
+
+```bash
+vpsga doctor
+vpsga update
+vpsga open [FILE|DIR]
+vpsga serve [FILE|DIR] [PORT]
+vpsga uninstall
+```
+
+`vpsga doctor` checks the installed executable, version, current-release link, required modules, and PATH command.
+
+`vpsga uninstall` requires an explicit confirmation and asks whether audit history should be retained.
 
 ## Read-only behavior
 
@@ -103,11 +166,11 @@ The normal audit does not:
 - delete logs or user files;
 - automatically repair findings.
 
-The bootstrap only installs or updates the VPS Guard Audit program itself under `/usr/local` so that `vpsga` is available system-wide.
+The bootstrap and `vpsga update` only install or update VPS Guard Audit itself under `/usr/local`.
 
-By default the audit reads the existing APT cache and does **not** run `apt-get update`. The optional `--refresh-package-index` flag refreshes APT metadata and therefore writes under `/var/lib/apt/lists`.
+By default, the audit reads the existing APT cache and does **not** run `apt-get update`. The optional `--refresh-package-index` flag refreshes APT metadata and therefore writes under `/var/lib/apt/lists`.
 
-`--rootkit-check` only launches `rkhunter` or `chkrootkit` when already installed. The normal audit does not install third-party scanners.
+`--rootkit-check` only launches `rkhunter` or `chkrootkit` when already installed. The audit does not install third-party scanners.
 
 ## Major checks
 
@@ -132,7 +195,7 @@ By default the audit reads the existing APT cache and does **not** run `apt-get 
 - Proxy/VPN services and risky helper scripts
 - Optional existing rootkit scanners
 
-## Options
+## Audit options
 
 ```text
 --lang zh|en
@@ -146,18 +209,20 @@ By default the audit reads the existing APT cache and does **not** run `apt-get 
 --policy baseline|strict
 --full-identifiers
 --rootkit-check
+--no-history
 --quiet
 -h, --help
 -v, --version
 ```
 
-Examples after installation:
+Examples:
 
 ```bash
 vpsga
 vpsga --lang en
 vpsga --output-dir /root/audit-reports
 vpsga --rootkit-check
+vpsga --no-history
 vpsga --version
 ```
 
@@ -167,7 +232,7 @@ vpsga --version
 
 ### Privacy
 
-Default reports avoid full hardware identifiers and SSH fingerprints and mask the last octet of IPv4 login addresses. Use `--full-identifiers` only when a complete forensic report is required.
+Full reports avoid some complete hardware identifiers and mask parts of login information by default. Use `--full-identifiers` only when a more complete forensic report is required. The AI report applies an additional redaction layer but must still be reviewed manually.
 
 ## Optional configuration
 
@@ -179,16 +244,16 @@ sudo ./vps-guard-audit.sh --config config/audit.conf
 
 Use the configuration file to mark trusted login IPs, intentional custom ports, the host profile, policy, and output limit.
 
-## Manual system-wide installation
-
-From a cloned or downloaded repository:
+## Manual installation
 
 ```bash
+git clone https://github.com/AshFog/vps-guard-audit.git
+cd vps-guard-audit
 sudo ./install.sh
 vpsga
 ```
 
-The installer keeps versioned program files under:
+Versioned files are stored under:
 
 ```text
 /usr/local/lib/vps-guard-audit/releases/VERSION/
@@ -209,28 +274,28 @@ The compatibility command `vps-guard-audit` remains available in `/usr/local/sbi
 | 0 | No warnings or failures |
 | 1 | Warnings found |
 | 2 | Failures found |
-| 64 | Invalid option |
+| 64 | Invalid option or port |
 | 65 | Interactive terminal unavailable |
-| 66 | Unreadable config or incomplete installation source |
-| 69 | Required audit files could not be downloaded or installed |
+| 66 | Missing report, config, or installation source |
+| 69 | Required files, tools, or installation resources unavailable |
 | 77 | Root privileges required |
 
 A warning or failure exit code is an audit result, not a script crash. Do not append `exit $?` inside an active SSH shell.
 
 ## Security limitations
 
-No shell script can prove that a host is clean or that an all-interface listener is reachable from the public Internet. Cloud firewalls, NAT, routers, Docker forwarding, and kernel compromise can change the effective exposure. Unknown successful logins, unexpected UID 0 accounts, malicious processes, or unexplained persistence should be treated seriously.
+No shell script can prove that a host is clean or that an all-interface listener is reachable from the public Internet. Cloud firewalls, NAT, routers, Docker forwarding, and kernel compromise can change effective exposure. Unknown successful logins, unexpected UID 0 accounts, malicious processes, or unexplained persistence should be treated seriously.
 
 AI-generated remediation steps must also be reviewed. Before SSH, firewall, Docker, networking, or reboot changes, preserve the current session, verify backups or snapshots, and ensure console or rescue access is available.
 
 ## Development
 
 ```bash
-bash -n vps-guard-audit.sh bootstrap.sh install.sh lib/*.sh
-shellcheck vps-guard-audit.sh bootstrap.sh install.sh lib/*.sh
+bash -n vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh lib/*.sh
+shellcheck vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh lib/*.sh
 ```
 
-GitHub Actions performs syntax checks, ShellCheck, JSON validation, Chinese/English beginner-report tests, and a system-wide `vpsga` installation smoke test.
+GitHub Actions checks syntax, ShellCheck, JSON output, Chinese and English report bundles, history comparison, system installation, and the `vpsga` manager.
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
