@@ -142,7 +142,7 @@ cmd_update() {
   command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 69; }
   command -v tar >/dev/null 2>&1 || { echo "tar is required" >&2; exit 69; }
   tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' EXIT
+  trap 'rm -rf -- "${tmp:-}"' EXIT
   archive="$tmp/vpsga.tar.gz"
   echo "Downloading the current VPS Guard Audit source..."
   curl --fail --show-error --location --connect-timeout 15 --max-time 120 --retry 2 --retry-delay 1 "$ARCHIVE_URL" -o "$archive"
