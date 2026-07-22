@@ -2,7 +2,7 @@
 
 ## 4.3.0 — 2026-07-22
 
-Beginner-report release focused on clarity, safe next steps, and AI-assisted remediation.
+Beginner-report release focused on clarity, safe next steps, AI-assisted remediation, and easier repeated use.
 
 ### Changed
 
@@ -11,6 +11,7 @@ Beginner-report release focused on clarity, safe next steps, and AI-assisted rem
 - Explains that warnings do not automatically mean the host is compromised.
 - Groups multiple sysctl deviations into one understandable hardening item while keeping the individual values in the report.
 - Keeps the project strictly audit-only: no automatic repair menu and no unattended configuration changes.
+- The official one-command bootstrap now installs or updates the program under `/usr/local` before running the audit.
 
 ### Added
 
@@ -21,6 +22,10 @@ Beginner-report release focused on clarity, safe next steps, and AI-assisted rem
 - Privacy guidance warning users not to share passwords, private keys, API keys, tokens, cookies, or other credentials.
 - Structured in-memory finding metadata used to build the beginner summary without changing the JSON finding schema.
 - Chinese and English summary smoke tests in GitHub Actions.
+- A global `vpsga` command in `/usr/local/bin`, available from any directory after the first one-command run.
+- A compatibility `vps-guard-audit` command in `/usr/local/sbin`.
+- Versioned installation directories under `/usr/local/lib/vps-guard-audit/releases/` with a `current` symlink.
+- A CI smoke test for system-wide installation and installed-command execution.
 
 ## 4.2.1 — 2026-07-22
 
