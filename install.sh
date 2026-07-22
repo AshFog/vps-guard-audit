@@ -53,7 +53,7 @@ rollback_install() {
 }
 
 [[ ${EUID:-$(id -u)} -eq 0 ]] || {
-  echo "Run the installer as root: sudo ./install.sh" >&2
+  echo "Run the installer as root: sudo bash ./install.sh" >&2
   exit 77
 }
 [[ -f "$SRC" ]] || { echo "Missing: $SRC" >&2; exit 66; }
@@ -72,6 +72,10 @@ VERSION="$(bash "$SRC" --version)"
 
 install -d -m 0755 "$INSTALL_ROOT" "$RELEASES_DIR" /usr/local/bin /usr/local/sbin
 STAGE="$(mktemp -d "$INSTALL_ROOT/.install-${VERSION}.XXXXXX")"
+# mktemp creates directories with mode 0700. The installed program must be
+# traversable by a non-root user before the wrapper can invoke sudo, so the
+# release root is intentionally 0755 while report/history data stays private.
+chmod 0755 "$STAGE"
 install -m 0755 "$SRC" "$STAGE/vps-guard-audit.sh"
 install -m 0755 "$MANAGER_SRC" "$STAGE/vpsga-manager.sh"
 install -d -m 0755 "$STAGE/lib"
@@ -89,6 +93,7 @@ if [[ -e "$RELEASE_DIR" || -L "$RELEASE_DIR" ]]; then
 fi
 mv "$STAGE" "$RELEASE_DIR"
 STAGE=""
+chmod 0755 "$RELEASE_DIR" "$RELEASE_DIR/lib"
 
 # Older development builds could leave `current` as a real directory. Move it
 # aside before creating the release symlink; otherwise `ln` creates a nested
