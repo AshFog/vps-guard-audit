@@ -1,18 +1,32 @@
 name: Shell checks
+
 on:
   push:
   pull_request:
+
 jobs:
-  lint:
+  lint-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Bash syntax
         run: bash -n vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh lib/*.sh
+
       - name: ShellCheck
         run: shellcheck vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh lib/*.sh
+
+      - name: Documentation links and removed features
+        run: |
+          test -s README.md
+          test -s README.zh-CN.md
+          grep -q '\[简体中文\](README.zh-CN.md)' README.md
+          grep -q '\[English\](README.md)' README.zh-CN.md
+          ! grep -R -nE 'vpsga (open|serve)|HTML_REPORT|generate_html_report' -- README.md README.zh-CN.md vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh lib .github
+
       - name: Non-mutating JSON smoke test
         run: |
+          mkdir -p "$RUNNER_TEMP/json"
           set +e
           sudo ./vps-guard-audit.sh \
             --lang en \
@@ -29,6 +43,7 @@ jobs:
           report="$(find "$RUNNER_TEMP/json" -maxdepth 1 -name 'vpsga-*.json' -print -quit)"
           test -n "$report"
           jq -e '.version == "4.4.0" and (.summary.pass | type == "number") and (.findings | type == "array")' "$report"
+
       - name: Bilingual report bundle smoke tests
         run: |
           mkdir -p "$RUNNER_TEMP/zh" "$RUNNER_TEMP/en"
@@ -54,6 +69,7 @@ jobs:
           grep -q 'AI 脱敏报告' "$zh_ai"
           grep -q 'Summary and next steps' "$en_full"
           grep -q 'AI-Safe Report' "$en_ai"
+
       - name: History comparison smoke test
         run: |
           mkdir -p "$RUNNER_TEMP/history-reports" "$RUNNER_TEMP/history-state"
@@ -70,16 +86,58 @@ jobs:
           test "$(find "$RUNNER_TEMP/history-state" -name 'vpsga-*.state' | wc -l)" -eq 2
           latest="$(find "$RUNNER_TEMP/history-reports" -name 'vpsga-*-full.txt' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)"
           grep -q 'Compared with the previous audit' "$latest"
-      - name: System install and vpsga manager smoke test
+
+      - name: Clean system installation
         run: |
+          sudo rm -rf /usr/local/lib/vps-guard-audit
+          sudo rm -f /usr/local/bin/vpsga /usr/local/sbin/vps-guard-audit
           sudo ./install.sh
           test -x /usr/local/bin/vpsga
+          test -L /usr/local/lib/vps-guard-audit/current
           test "$(vpsga --version)" = "4.4.0"
           help_output="$(vpsga --help)"
           grep -q 'vpsga \[options\]' <<<"$help_output"
           ! grep -q 'sudo ./vps-guard-audit.sh' <<<"$help_output"
           vpsga doctor
+
+      - name: Legacy current-directory migration regression test
+        run: |
+          sudo rm -rf /usr/local/lib/vps-guard-audit
+          sudo mkdir -p /usr/local/lib/vps-guard-audit/current/lib
+          sudo cp vps-guard-audit.sh vpsga-manager.sh /usr/local/lib/vps-guard-audit/current/
+          sudo cp lib/*.sh /usr/local/lib/vps-guard-audit/current/lib/
+          test -d /usr/local/lib/vps-guard-audit/current
+          test ! -L /usr/local/lib/vps-guard-audit/current
+          sudo ./install.sh
+          test -L /usr/local/lib/vps-guard-audit/current
+          resolved="$(readlink -f /usr/local/lib/vps-guard-audit/current)"
+          test "$resolved" = "/usr/local/lib/vps-guard-audit/releases/4.4.0"
+          test ! -e /usr/local/lib/vps-guard-audit/current/4.4.0
+          test "$(vpsga --version)" = "4.4.0"
+          vpsga doctor
+
+      - name: Non-root command and report ownership
+        run: |
+          out="$RUNNER_TEMP/user-owned-reports"
+          mkdir -p "$out"
+          test "$(stat -c %u "$out")" = "$(id -u)"
+          set +e
+          vpsga --lang en --profile vps --no-update-check --no-history --format both --output-dir "$out" --quiet
+          rc=$?
+          set -e
+          test "$rc" -ge 0 -a "$rc" -le 2
+          test "$(find "$out" -maxdepth 1 -name 'vpsga-*-full.txt' | wc -l)" -eq 1
+          test "$(find "$out" -maxdepth 1 -name 'vpsga-*-ai.txt' | wc -l)" -eq 1
+          test "$(find "$out" -maxdepth 1 -name 'vpsga-*.json' | wc -l)" -eq 1
+          while IFS= read -r report; do
+            test "$(stat -c %u "$report")" = "$(id -u)"
+            test "$(stat -c %a "$report")" = "600"
+          done < <(find "$out" -maxdepth 1 -type f -name 'vpsga-*')
+
+      - name: Manager command surface
+        run: |
           manager_help="$(/usr/local/lib/vps-guard-audit/current/vpsga-manager.sh --help)"
+          grep -q 'vpsga doctor' <<<"$manager_help"
           grep -q 'vpsga update' <<<"$manager_help"
           grep -q 'vpsga uninstall' <<<"$manager_help"
           ! grep -q 'vpsga open' <<<"$manager_help"
