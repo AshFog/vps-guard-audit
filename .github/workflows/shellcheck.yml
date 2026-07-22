@@ -8,6 +8,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Bash syntax
-        run: bash -n vps-guard-audit.sh bootstrap.sh install.sh
+        run: bash -n vps-guard-audit.sh bootstrap.sh install.sh lib/*.sh
       - name: ShellCheck
-        run: shellcheck vps-guard-audit.sh bootstrap.sh install.sh
+        run: shellcheck vps-guard-audit.sh bootstrap.sh install.sh lib/*.sh
+      - name: Non-mutating JSON smoke test
+        run: |
+          set +e
+          sudo ./vps-guard-audit.sh \
+            --lang en \
+            --profile vps \
+            --policy baseline \
+            --no-update-check \
+            --format json \
+            --output-dir "$RUNNER_TEMP" \
+            --quiet
+          rc=$?
+          set -e
+          test "$rc" -ge 0 -a "$rc" -le 2
+          report="$(find "$RUNNER_TEMP" -maxdepth 1 -name 'vps-guard-audit-*.json' -print -quit)"
+          test -n "$report"
+          jq -e '.version == "4.2.0" and (.summary.pass | type == "number") and (.findings | type == "array")' "$report"
