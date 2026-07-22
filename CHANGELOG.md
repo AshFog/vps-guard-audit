@@ -1,12 +1,49 @@
 # Changelog
 
+## 4.2.0 — 2026-07-22
+
+Compatibility and accuracy release based on Debian 13 and Ubuntu 24.04 field tests.
+
+### Fixed
+
+- Supports Debian 13 login history through `wtmpdb`, with `last`, `lastb`, `journalctl` and `lslogins` fallbacks.
+- Excludes the currently running audit and its temporary directory from temporary-executable findings.
+- Merges duplicate IPv4 and IPv6 listeners before scoring and counting.
+- Fixes JSON summaries being reset by the previous `tee` pipeline subshell.
+- Prevents `/etc/os-release` from overwriting the audit's own `VERSION` variable.
+- Missing optional commands now produce `SKIP` instead of false `PASS` results.
+- Rootkit scanners now distinguish missing tools, execution warnings and successful completion.
+- Fail2ban inactivity no longer produces a second jail warning and a duplicate failed-unit warning.
+
+### Changed
+
+- Renames “public listener” findings to “all-interface listener”; local checks do not claim Internet reachability.
+- Adds automatic `vps`, `server`, `desktop` and `container` host profiles.
+- Treats Avahi/mDNS as normal desktop discovery but warns on server profiles.
+- Adds `baseline` and `strict` SSH policies to reduce false positives from reasonable OpenSSH defaults.
+- Stops refreshing APT metadata by default; `--refresh-package-index` is now explicit.
+- Limits package, service, cron, timer and SUID output.
+- Suppresses full hardware identifiers, login IPs and SSH fingerprints by default.
+- AppArmor output is summarized instead of dumping every loaded profile.
+- Splits the audit engine into maintainable modules under `lib/`.
+
+### Added
+
+- Native nftables and firewalld detection alongside UFW and iptables.
+- Docker published-port warnings that explain UFW INPUT limitations.
+- Docker checks for host namespaces, weak security options, high-risk capabilities and sensitive mounts.
+- APT index age, security-source, held-package, reboot and running-kernel checks.
+- Host-only SUID/SGID inventory that excludes Docker, containerd and Snap storage layers.
+- `--profile`, `--policy`, `--full-identifiers` and `--refresh-package-index` options.
+- CI JSON smoke test.
+
 ## 4.1.0 — 2026-07-22
 
 Field-tested hardening release based on a real Ubuntu 24.04 VPS audit.
 
 ### Fixed
 
-- Correctly detects public listeners bound to `0.0.0.0`, `*`, and `[::]`.
+- Correctly detects listeners bound to `0.0.0.0`, `*`, and `[::]`.
 - No longer reports “no public listeners” when `ss` clearly shows exposed services.
 - Limits Fail2ban output to summary data and at most 20 sample banned IPs.
 - Adds a `/dev/tty`-safe bootstrap command so the language menu works without `/dev/fd`.
@@ -16,11 +53,5 @@ Field-tested hardening release based on a real Ubuntu 24.04 VPS audit.
 - High-risk detection for public CUPS (`631/tcp`) and Docker API (`2375/2376`).
 - Review warnings for publicly exposed database and data-service ports.
 - Detection of direct `iptables ACCEPT` rules placed before UFW chains.
-- Detection of UFW allow rules with no corresponding active public listener.
+- Detection of UFW allow rules with no corresponding active listener.
 - UFW boot-enable check.
-- Public-listener count in the final findings.
-
-### Documentation
-
-- Replaced placeholder repository URLs with `AshFog/vps-guard-audit`.
-- Added safer one-command usage and release notes.
