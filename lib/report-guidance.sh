@@ -14,9 +14,5 @@ finding_plain_text() {
   PLAIN_MEANING=""
   PLAIN_ACTION="$rec"
   PLAIN_CAUTION=""
-  if [[ "$LANGUAGE" == zh ]]; then
-    finding_plain_text_zh "$id"
-  else
-    finding_plain_text_en "$id"
-  fi
+  finding_plain_text_zh "$id"
 }
