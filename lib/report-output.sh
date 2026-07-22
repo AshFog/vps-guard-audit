@@ -8,14 +8,6 @@ declare -a HISTORY_CHANGED=()
 HISTORY_PREVIOUS=""
 HISTORY_FIRST_RUN=0
 
-html_escape_stream() {
-  sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g' -e "s/'/\&#39;/g"
-}
-
-html_escape_text() {
-  printf '%s' "${1-}" | html_escape_stream
-}
-
 add_redaction_pair() {
   local replacement="$1" original="$2"
   [[ -n "$original" ]] || return 0
@@ -216,95 +208,4 @@ save_history_state() {
   find "$HISTORY_DIR" -maxdepth 1 -type f -name 'vpsga-*.state' -printf '%f\n' 2>/dev/null \
     | sort -r | tail -n +31 \
     | while IFS= read -r old; do rm -f "$HISTORY_DIR/$old"; done
-}
-
-write_html_findings() {
-  local wanted="$1" idx id title detail rec css label
-  for idx in "${!FINDING_IDS[@]}"; do
-    [[ "${FINDING_LEVELS[$idx]}" == "$wanted" ]] || continue
-    id="${FINDING_IDS[$idx]}"
-    title="${FINDING_TITLES[$idx]}"
-    detail="${FINDING_DETAILS[$idx]}"
-    rec="${FINDING_RECOMMENDATIONS[$idx]}"
-    finding_plain_text "$id" "$rec"
-    case "$wanted" in FAIL) css="danger" ;; WARN) css="warning" ;; *) css="normal" ;; esac
-    label="$wanted"
-    printf '<article class="finding %s"><div class="badge">%s</div><h3>%s</h3>' "$css" "$label" "$(html_escape_text "$title")"
-    [[ -n "$detail" ]] && printf '<p><strong>%s</strong> %s</p>' "$([[ "$LANGUAGE" == zh ]] && echo '检测信息：' || echo 'Detected:')" "$(html_escape_text "$detail")"
-    printf '<p><strong>%s</strong> %s</p>' "$([[ "$LANGUAGE" == zh ]] && echo '这表示：' || echo 'What it means:')" "$(html_escape_text "$PLAIN_MEANING")"
-    [[ -n "$PLAIN_ACTION" ]] && printf '<p><strong>%s</strong> %s</p>' "$([[ "$LANGUAGE" == zh ]] && echo '建议：' || echo 'Suggested next step:')" "$(html_escape_text "$PLAIN_ACTION")"
-    [[ -n "$PLAIN_CAUTION" ]] && printf '<p class="caution"><strong>%s</strong> %s</p>' "$([[ "$LANGUAGE" == zh ]] && echo '操作提醒：' || echo 'Caution:')" "$(html_escape_text "$PLAIN_CAUTION")"
-    printf '</article>\n'
-  done
-}
-
-generate_html_report() {
-  local full_name ai_name json_name conclusion item
-  full_name="$(basename "$FULL_REPORT")"
-  ai_name="$(basename "$AI_REPORT")"
-  json_name="$(basename "$JSON_REPORT")"
-  if [[ "$LANGUAGE" == zh ]]; then
-    if ((FAIL > 0)); then conclusion="发现需要尽快处理的问题"; elif ((WARN > 0)); then conclusion="没有发现明确的高危问题，但有项目需要确认或改进"; else conclusion="没有发现明确的高危问题"; fi
-  else
-    if ((FAIL > 0)); then conclusion="Issues requiring prompt attention were found"; elif ((WARN > 0)); then conclusion="No clear high-risk issue was found, but some items need review"; else conclusion="No clear high-risk issue was found"; fi
-  fi
-
-  {
-    cat <<'EOF_HTML_HEAD'
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>VPS Guard Audit</title>
-<style>
-:root{color-scheme:light dark;--bg:#f5f7fa;--card:#fff;--text:#18212f;--muted:#627083;--line:#dfe5ec;--ok:#147d4f;--warn:#9a6500;--bad:#b42318}@media(prefers-color-scheme:dark){:root{--bg:#101418;--card:#171d23;--text:#edf2f7;--muted:#a7b2c0;--line:#303943;--ok:#6dd6a4;--warn:#f5c451;--bad:#ff8a80}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.wrap{max-width:1040px;margin:0 auto;padding:32px 20px 64px}header,.panel,.finding{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;margin-bottom:16px}h1{margin:0 0 6px;font-size:30px}h2{margin:0 0 14px}h3{margin:8px 0}.muted{color:var(--muted)}.summary{display:grid;grid-template-columns:repeat(5,minmax(110px,1fr));gap:10px;margin-top:18px}.metric{border:1px solid var(--line);border-radius:12px;padding:12px}.metric b{display:block;font-size:24px}.links{display:flex;flex-wrap:wrap;gap:10px}.links a{color:inherit;border:1px solid var(--line);border-radius:10px;padding:7px 11px;text-decoration:none}.badge{display:inline-block;font-size:12px;font-weight:700;border-radius:999px;padding:3px 9px;background:var(--line)}.finding.warning{border-left:5px solid var(--warn)}.finding.danger{border-left:5px solid var(--bad)}.caution{color:var(--warn)}details{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px}summary{cursor:pointer;font-weight:700}pre{white-space:pre-wrap;word-break:break-word;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}.history li{margin:4px 0}@media(max-width:720px){.summary{grid-template-columns:repeat(2,1fr)}}
-</style>
-</head>
-<body><main class="wrap">
-EOF_HTML_HEAD
-    printf '<header><h1>VPS Guard Audit</h1><p class="muted">%s · %s · %s</p><p>%s</p>' "$(html_escape_text "$STAMP")" "$(html_escape_text "$HOST_PROFILE")" "$(html_escape_text "$OS_ID $OS_VERSION")" "$(html_escape_text "$conclusion")"
-    printf '<div class="summary"><div class="metric"><b>%s</b>PASS</div><div class="metric"><b>%s</b>WARN</div><div class="metric"><b>%s</b>FAIL</div><div class="metric"><b>%s</b>INFO</div><div class="metric"><b>%s</b>SKIP</div></div></header>' "$PASS" "$WARN" "$FAIL" "$INFO" "$SKIP"
-    printf '<section class="panel"><h2>%s</h2><div class="links">' "$([[ "$LANGUAGE" == zh ]] && echo '报告文件' || echo 'Report files')"
-    printf '<a href="%s">Full TXT</a><a href="%s">AI TXT</a>' "$(html_escape_text "$full_name")" "$(html_escape_text "$ai_name")"
-    [[ -f "$JSON_REPORT" ]] && printf '<a href="%s">JSON</a>' "$(html_escape_text "$json_name")"
-    printf '</div></section>'
-
-    if [[ "$HISTORY_ENABLED" -eq 1 ]]; then
-      printf '<section class="panel history"><h2>%s</h2>' "$([[ "$LANGUAGE" == zh ]] && echo '与上次相比' || echo 'Compared with previous audit')"
-      if ((HISTORY_FIRST_RUN)); then
-        printf '<p>%s</p>' "$([[ "$LANGUAGE" == zh ]] && echo '这是第一次保存历史结果。' || echo 'This is the first saved baseline.')"
-      else
-        printf '<p>%s: %s · %s: %s · %s: %s</p>' \
-          "$([[ "$LANGUAGE" == zh ]] && echo '新增' || echo 'New')" "${#HISTORY_ADDED[@]}" \
-          "$([[ "$LANGUAGE" == zh ]] && echo '已解决' || echo 'Resolved')" "${#HISTORY_RESOLVED[@]}" \
-          "$([[ "$LANGUAGE" == zh ]] && echo '变化' || echo 'Changed')" "${#HISTORY_CHANGED[@]}"
-        ((${#HISTORY_ADDED[@]})) && { printf '<h3>%s</h3><ul>' "$([[ "$LANGUAGE" == zh ]] && echo '新增' || echo 'New')"; for item in "${HISTORY_ADDED[@]}"; do printf '<li>%s</li>' "$(html_escape_text "$item")"; done; printf '</ul>'; }
-        ((${#HISTORY_RESOLVED[@]})) && { printf '<h3>%s</h3><ul>' "$([[ "$LANGUAGE" == zh ]] && echo '已解决' || echo 'Resolved')"; for item in "${HISTORY_RESOLVED[@]}"; do printf '<li>%s</li>' "$(html_escape_text "$item")"; done; printf '</ul>'; }
-      fi
-      printf '</section>'
-    fi
-
-    if ((FAIL > 0)); then
-      printf '<section><h2>%s</h2>' "$([[ "$LANGUAGE" == zh ]] && echo '需要尽快处理' || echo 'Needs prompt attention')"
-      write_html_findings FAIL
-      printf '</section>'
-    fi
-    if ((WARN > 0)); then
-      printf '<section><h2>%s</h2>' "$([[ "$LANGUAGE" == zh ]] && echo '需要确认或改进' || echo 'Review or improvement')"
-      write_html_findings WARN
-      printf '</section>'
-    fi
-
-    printf '<details><summary>%s</summary><pre>' "$([[ "$LANGUAGE" == zh ]] && echo '查看完整技术报告' || echo 'View full technical report')"
-    html_escape_stream <"$FULL_REPORT"
-    printf '</pre></details></main></body></html>\n'
-  } >"$HTML_REPORT"
-  chmod 0600 "$HTML_REPORT" 2>/dev/null || true
-}
-
-file_url() {
-  local absolute
-  absolute="$(readlink -f "$1" 2>/dev/null || printf '%s' "$1")"
-  printf 'file://%s' "${absolute// /%20}"
 }
