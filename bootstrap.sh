@@ -2,12 +2,24 @@
 set -euo pipefail
 
 ARCHIVE_URL="https://github.com/AshFog/vps-guard-audit/archive/refs/heads/main.tar.gz"
+ORIGINAL_DIR="$(pwd -P)"
 TMP_DIR="$(mktemp -d)"
 ARCHIVE="$TMP_DIR/vps-guard-audit.tar.gz"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 69; }
 command -v tar >/dev/null 2>&1 || { echo "tar is required" >&2; exit 69; }
+
+ARGS=("$@")
+HAS_OUTPUT_DIR=0
+for arg in "${ARGS[@]}"; do
+  case "$arg" in
+    --output-dir|--output-dir=*) HAS_OUTPUT_DIR=1; break ;;
+  esac
+done
+if [[ "$HAS_OUTPUT_DIR" -eq 0 ]]; then
+  ARGS+=(--output-dir "$ORIGINAL_DIR")
+fi
 
 echo "[1/3] Downloading VPS Guard Audit..."
 curl --fail --show-error --location \
@@ -25,11 +37,12 @@ SCRIPT="$ROOT_DIR/vps-guard-audit.sh"
 chmod 0700 "$SCRIPT"
 
 echo "[3/3] Starting audit..."
+echo "Reports will be saved in: $ORIGINAL_DIR"
 set +e
 if [[ "$(id -u)" -eq 0 ]]; then
-  (cd "$ROOT_DIR" && bash "$SCRIPT" "$@" </dev/tty)
+  (cd "$ROOT_DIR" && bash "$SCRIPT" "${ARGS[@]}" </dev/tty)
 else
-  (cd "$ROOT_DIR" && sudo bash "$SCRIPT" "$@" </dev/tty)
+  (cd "$ROOT_DIR" && sudo bash "$SCRIPT" "${ARGS[@]}" </dev/tty)
 fi
 rc=$?
 set -e
