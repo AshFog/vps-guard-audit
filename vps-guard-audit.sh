@@ -197,7 +197,6 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 FULL_REPORT="${OUTPUT_DIR}/vpsga-${STAMP}-full.txt"
 AI_REPORT="${OUTPUT_DIR}/vpsga-${STAMP}-ai.txt"
 JSON_REPORT="${OUTPUT_DIR}/vpsga-${STAMP}.json"
-HTML_REPORT="${OUTPUT_DIR}/vpsga-${STAMP}.html"
 TMP_DIR="$(mktemp -d)"
 MODULE_TMP_DIR=""
 trap 'rm -rf "$TMP_DIR"; [[ -n "$MODULE_TMP_DIR" ]] && rm -rf "$MODULE_TMP_DIR"' EXIT
@@ -392,12 +391,11 @@ fi
 
 if [[ "$FORMAT" == text || "$FORMAT" == both ]]; then
   generate_ai_report
-  generate_html_report
 fi
 save_history_state
 
 if [[ "$FORMAT" == json ]]; then
-  rm -f "$FULL_REPORT" "$AI_REPORT" "$HTML_REPORT"
+  rm -f "$FULL_REPORT" "$AI_REPORT"
 elif [[ "$FORMAT" == text ]]; then
   rm -f "$JSON_REPORT"
 fi
@@ -409,13 +407,6 @@ echo "$(t reports):"
 [[ -f "$FULL_REPORT" ]] && echo "  FULL: $FULL_REPORT"
 [[ -f "$AI_REPORT" ]] && echo "  AI  : $AI_REPORT"
 [[ -f "$JSON_REPORT" ]] && echo "  JSON: $JSON_REPORT"
-if [[ -f "$HTML_REPORT" ]]; then
-  echo "  HTML: $HTML_REPORT"
-  echo "  OPEN: $(file_url "$HTML_REPORT")"
-  if command -v vpsga >/dev/null 2>&1; then
-    [[ "$LANGUAGE" == zh ]] && echo "  浏览器查看：vpsga open 或 vpsga serve" || echo "  Browser view: vpsga open or vpsga serve"
-  fi
-fi
 echo "============================================================"
 
 if ((FAIL > 0)); then exit 2
