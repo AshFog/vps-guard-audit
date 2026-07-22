@@ -1,0 +1,44 @@
+name: Install diagnostics
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          show-progress: false
+      - name: Run installation test
+        id: install
+        continue-on-error: true
+        run: |
+          set +e
+          {
+            set -euxo pipefail
+            pwd
+            ls -la install.sh vps-guard-audit.sh vpsga-manager.sh
+            sudo rm -rf /usr/local/lib/vps-guard-audit
+            sudo rm -f /usr/local/bin/vpsga /usr/local/sbin/vps-guard-audit
+            sudo bash ./install.sh
+            find /usr/local/lib/vps-guard-audit -maxdepth 3 -printf '%M %u:%g %p -> %l\n' | sort
+            /usr/local/bin/vpsga --version
+            /usr/local/bin/vpsga --help
+            /usr/local/bin/vpsga doctor
+          } >"$RUNNER_TEMP/install-debug.log" 2>&1
+          rc=$?
+          cat "$RUNNER_TEMP/install-debug.log"
+          exit "$rc"
+      - name: Upload installation log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: focused-install-log
+          path: ${{ runner.temp }}/install-debug.log
+          if-no-files-found: error
+          retention-days: 3
+      - name: Preserve failure
+        if: steps.install.outcome == 'failure'
+        run: exit 1
