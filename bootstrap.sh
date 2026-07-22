@@ -9,7 +9,7 @@ curl -fsSL "$URL" -o "$TMP"
 chmod 0700 "$TMP"
 
 if [[ "$(id -u)" -eq 0 ]]; then
-  bash "$TMP" </dev/tty
+  bash "$TMP" "$@" </dev/tty
 else
-  sudo bash "$TMP" </dev/tty
+  sudo bash "$TMP" "$@" </dev/tty
 fi
