@@ -2,7 +2,7 @@
 
 ## 4.4.0 — 2026-07-22
 
-Report bundle, stronger AI redaction, history comparison, and management-command release.
+Report bundle, stronger AI redaction, history comparison, safer installation, and management-command release.
 
 ### Added
 
@@ -13,20 +13,39 @@ Report bundle, stronger AI redaction, history comparison, and management-command
 - Up to 30 compact history state files under `/var/lib/vps-guard-audit/history/`.
 - `--no-history` for audits that should not read or save comparison state.
 - `vpsga doctor`, `vpsga update`, and `vpsga uninstall` management commands.
-- CI coverage for report bundles, history comparison, system installation, and manager commands.
+- Separate English and Simplified Chinese documentation: `README.md` and `README.zh-CN.md`.
+- CI coverage for bilingual report bundles, history comparison, clean installation, legacy-layout migration, non-root execution, report ownership, and manager commands.
+
+### Fixed
+
+- Repairs the installation failure that occurred when an earlier development build left `/usr/local/lib/vps-guard-audit/current` as a real directory instead of a symlink.
+- Prevents `ln` from creating a nested `current/VERSION` symlink that made the global `vpsga` command report an incomplete installation.
+- Validates staged scripts and modules before switching the active release.
+- Verifies the installed `vpsga` version and runs `vpsga doctor` before the bootstrap starts the first audit.
+- Returns report ownership to the non-root user who invoked `vpsga` when the selected output directory belongs to that user.
+- Captures Debian failed-login fallback output consistently instead of printing some fallback data outside the report variable.
+- Treats unavailable sysctl values as `SKIP` rather than security warnings.
+- Accepts secure `0600` and `0640` modes for `/etc/shadow` and `/etc/gshadow`.
+- Avoids claiming that no ports are listening when the `ss` command is unavailable.
+- Avoids claiming Docker security checks passed when `docker inspect` data could not be read.
+- Quotes Docker container IDs safely and removes unreliable unquoted expansion.
+- Treats host firewall and AppArmor visibility more carefully inside containers.
+- Makes update temporary-directory cleanup safe with `set -u`.
 
 ### Changed
 
 - Report names no longer contain the hostname or language; the generation timestamp identifies the matching bundle.
-- The AI guidance now tells users to prefer the `*-ai.txt` report over the complete report.
-- The system installer now includes the report manager and report-output module.
-- README introduction and documentation were simplified in both Chinese and English.
-- The earlier HTML report and local viewer commands were removed before the v4.4 release because they added little value for typical SSH-based VPS use.
+- The AI guidance tells users to prefer the `*-ai.txt` report over the complete report.
+- The system installer uses versioned releases and a verified `current` symlink.
+- README documentation presents `vpsga` as the normal installed command and reserves `sudo ./vps-guard-audit.sh` for contributors working inside a cloned source directory.
+- The earlier HTML report and local viewer commands were removed before release because they added little value for typical SSH-based use.
 
 ### Security
 
 - The AI report maps or removes some hostnames, usernames, container names, domains, IPv4 addresses, email addresses, MAC addresses, and SSH fingerprints.
 - Automatic redaction remains best-effort, and reports must still be reviewed before sharing.
+- Installation files are checked for syntax and required modules before activation.
+- `vpsga doctor` verifies that the active release stays inside the managed releases directory and that installed files are not group- or world-writable.
 
 ## 4.3.0 — 2026-07-22
 

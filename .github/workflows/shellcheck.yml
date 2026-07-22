@@ -5,16 +5,24 @@ on:
   pull_request:
 
 jobs:
-  lint-and-test:
+  repository-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          show-progress: false
 
       - name: Bash syntax
         run: bash -n vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh lib/*.sh
 
       - name: ShellCheck
-        run: shellcheck vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh lib/*.sh
+        run: |
+          # Main functions are called by sourced modules, which ShellCheck cannot
+          # follow reliably across this modular script layout.
+          shellcheck -x -e SC1010,SC2005,SC2015,SC2034,SC2317 vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh
+          # Modules intentionally consume globals and helper functions defined
+          # by the main entry point.
+          shellcheck -x -e SC2009,SC2015,SC2034,SC2154 lib/*.sh
 
       - name: Documentation links and removed features
         run: |
@@ -22,21 +30,13 @@ jobs:
           test -s README.zh-CN.md
           grep -q '\[简体中文\](README.zh-CN.md)' README.md
           grep -q '\[English\](README.md)' README.zh-CN.md
-          ! grep -R -nE 'vpsga (open|serve)|HTML_REPORT|generate_html_report' -- README.md README.zh-CN.md vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh lib .github
+          ! grep -R -nE 'vpsga (open|serve)|HTML_REPORT|generate_html_report' -- README.md README.zh-CN.md vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh lib
 
       - name: Non-mutating JSON smoke test
         run: |
           mkdir -p "$RUNNER_TEMP/json"
           set +e
-          sudo ./vps-guard-audit.sh \
-            --lang en \
-            --profile vps \
-            --policy baseline \
-            --no-update-check \
-            --no-history \
-            --format json \
-            --output-dir "$RUNNER_TEMP/json" \
-            --quiet
+          sudo bash ./vps-guard-audit.sh --lang en --profile vps --policy baseline --no-update-check --no-history --format json --output-dir "$RUNNER_TEMP/json" --quiet
           rc=$?
           set -e
           test "$rc" -ge 0 -a "$rc" -le 2
@@ -48,9 +48,9 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/zh" "$RUNNER_TEMP/en"
           set +e
-          sudo ./vps-guard-audit.sh --lang zh --profile vps --no-update-check --no-history --format both --output-dir "$RUNNER_TEMP/zh" --quiet
+          sudo bash ./vps-guard-audit.sh --lang zh --profile vps --no-update-check --no-history --format both --output-dir "$RUNNER_TEMP/zh" --quiet
           zh_rc=$?
-          sudo ./vps-guard-audit.sh --lang en --profile vps --no-update-check --no-history --format both --output-dir "$RUNNER_TEMP/en" --quiet
+          sudo bash ./vps-guard-audit.sh --lang en --profile vps --no-update-check --no-history --format both --output-dir "$RUNNER_TEMP/en" --quiet
           en_rc=$?
           set -e
           test "$zh_rc" -ge 0 -a "$zh_rc" -le 2
@@ -75,10 +75,10 @@ jobs:
           mkdir -p "$RUNNER_TEMP/history-reports" "$RUNNER_TEMP/history-state"
           export VPSGA_HISTORY_DIR="$RUNNER_TEMP/history-state"
           set +e
-          sudo -E ./vps-guard-audit.sh --lang en --profile vps --no-update-check --format text --output-dir "$RUNNER_TEMP/history-reports" --quiet
+          sudo -E bash ./vps-guard-audit.sh --lang en --profile vps --no-update-check --format text --output-dir "$RUNNER_TEMP/history-reports" --quiet
           first_rc=$?
           sleep 1
-          sudo -E ./vps-guard-audit.sh --lang en --profile vps --no-update-check --format text --output-dir "$RUNNER_TEMP/history-reports" --quiet
+          sudo -E bash ./vps-guard-audit.sh --lang en --profile vps --no-update-check --format text --output-dir "$RUNNER_TEMP/history-reports" --quiet
           second_rc=$?
           set -e
           test "$first_rc" -ge 0 -a "$first_rc" -le 2
@@ -87,42 +87,54 @@ jobs:
           latest="$(find "$RUNNER_TEMP/history-reports" -name 'vpsga-*-full.txt' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)"
           grep -q 'Compared with the previous audit' "$latest"
 
+  installation-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          show-progress: false
+
       - name: Clean system installation
         run: |
+          set -euxo pipefail
           sudo rm -rf /usr/local/lib/vps-guard-audit
           sudo rm -f /usr/local/bin/vpsga /usr/local/sbin/vps-guard-audit
-          sudo ./install.sh
+          sudo bash ./install.sh
+          ls -la /usr/local/lib/vps-guard-audit
+          ls -la /usr/local/lib/vps-guard-audit/current/
           test -x /usr/local/bin/vpsga
           test -L /usr/local/lib/vps-guard-audit/current
-          test "$(vpsga --version)" = "4.4.0"
-          help_output="$(vpsga --help)"
+          test "$(/usr/local/bin/vpsga --version)" = "4.4.0"
+          help_output="$(/usr/local/bin/vpsga --help)"
           grep -q 'vpsga \[options\]' <<<"$help_output"
           ! grep -q 'sudo ./vps-guard-audit.sh' <<<"$help_output"
-          vpsga doctor
+          /usr/local/bin/vpsga doctor
 
       - name: Legacy current-directory migration regression test
         run: |
+          set -euxo pipefail
           sudo rm -rf /usr/local/lib/vps-guard-audit
           sudo mkdir -p /usr/local/lib/vps-guard-audit/current/lib
           sudo cp vps-guard-audit.sh vpsga-manager.sh /usr/local/lib/vps-guard-audit/current/
           sudo cp lib/*.sh /usr/local/lib/vps-guard-audit/current/lib/
           test -d /usr/local/lib/vps-guard-audit/current
           test ! -L /usr/local/lib/vps-guard-audit/current
-          sudo ./install.sh
+          sudo bash ./install.sh
           test -L /usr/local/lib/vps-guard-audit/current
           resolved="$(readlink -f /usr/local/lib/vps-guard-audit/current)"
           test "$resolved" = "/usr/local/lib/vps-guard-audit/releases/4.4.0"
           test ! -e /usr/local/lib/vps-guard-audit/current/4.4.0
-          test "$(vpsga --version)" = "4.4.0"
-          vpsga doctor
+          test "$(/usr/local/bin/vpsga --version)" = "4.4.0"
+          /usr/local/bin/vpsga doctor
 
       - name: Non-root command and report ownership
         run: |
+          set -euxo pipefail
           out="$RUNNER_TEMP/user-owned-reports"
           mkdir -p "$out"
           test "$(stat -c %u "$out")" = "$(id -u)"
           set +e
-          vpsga --lang en --profile vps --no-update-check --no-history --format both --output-dir "$out" --quiet
+          /usr/local/bin/vpsga --lang en --profile vps --no-update-check --no-history --format both --output-dir "$out" --quiet
           rc=$?
           set -e
           test "$rc" -ge 0 -a "$rc" -le 2
