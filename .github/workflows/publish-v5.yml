@@ -1,0 +1,44 @@
+name: 发布 v5.0.0
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 创建 v5.0.0 Tag 和 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v5.0.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "v5.0.0 已存在，无需重复发布。"
+            exit 0
+          fi
+          gh release create v5.0.0 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target 7688e454ad2461149eaac5f0d7a3fc8437ee2090 \
+            --title "VPS Guard Audit v5.0.0 — 中文原生审计框架" \
+            --notes "VPS Guard Audit v5.0.0 将项目正式升级为面向中文用户的 Ubuntu / Debian VPS 只读安全审计框架。
+
+主要变化：
+- 安装、终端、帮助、管理命令和报告全面中文化
+- 状态标签改为「正常 / 提醒 / 问题 / 信息 / 跳过」
+- 引入稳定检查编号和检查注册表
+- JSON 升级为 Schema 2.0，增加可信度、适用性、证据和前置条件
+- 增加 quick、standard、deep 三档检测深度
+- 增加六套中文配置档案模板
+- 增加运行锁、符号链接防护、安装权限和 SHA-256 完整性保护
+- 历史比较改用稳定编号和实例键
+- v4.4.0 保留为最后一个双语稳定版本
+
+安装：
+curl -fsSL https://raw.githubusercontent.com/AshFog/vps-guard-audit/main/bootstrap.sh | bash
+
+运行：
+vpsga"
