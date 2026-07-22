@@ -17,19 +17,30 @@ Validated releases:
 
 The audit auto-detects `vps`, `server`, `desktop`, and `container` profiles. Other Ubuntu/Debian versions may run, but the report warns when they are outside the validated matrix.
 
-## One-command run
+## One-command run and installation
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AshFog/vps-guard-audit/main/bootstrap.sh | bash
 ```
 
-The bootstrap:
+The first one-command run:
 
 1. reads the bilingual language menu directly from `/dev/tty`;
 2. downloads the complete repository archive once;
-3. runs the audit from a temporary directory;
-4. saves reports in the directory where the command was launched;
-5. removes only the temporary program files afterward.
+3. installs or updates the audit under `/usr/local/lib/vps-guard-audit`;
+4. creates the global command `/usr/local/bin/vpsga`;
+5. runs the audit and saves reports in the directory where the command was launched;
+6. removes the downloaded temporary archive and extraction directory.
+
+After the first run, start the audit from any directory with:
+
+```bash
+vpsga
+```
+
+When run by a non-root user, `vpsga` uses `sudo` because several security checks require root access. Reports are saved in the current directory unless `--output-dir` is supplied.
+
+Running the official one-command installer again updates the installed `vpsga` files to the current `main` branch and then starts a new audit.
 
 For higher assurance, pin a release tag or commit SHA instead of the moving `main` branch.
 
@@ -85,14 +96,16 @@ Never share passwords, SSH private keys, API keys, access tokens, cookies, or ot
 
 The normal audit does not:
 
-- install or remove packages;
+- install or remove operating-system packages;
 - edit SSH, sysctl, or firewall settings;
 - change passwords or SSH keys;
 - enable, disable, or restart services;
-- delete logs or files;
+- delete logs or user files;
 - automatically repair findings.
 
-By default it reads the existing APT cache and does **not** run `apt-get update`. The optional `--refresh-package-index` flag refreshes APT metadata and therefore writes under `/var/lib/apt/lists`.
+The bootstrap only installs or updates the VPS Guard Audit program itself under `/usr/local` so that `vpsga` is available system-wide.
+
+By default the audit reads the existing APT cache and does **not** run `apt-get update`. The optional `--refresh-package-index` flag refreshes APT metadata and therefore writes under `/var/lib/apt/lists`.
 
 `--rootkit-check` only launches `rkhunter` or `chkrootkit` when already installed. The normal audit does not install third-party scanners.
 
@@ -138,6 +151,16 @@ By default it reads the existing APT cache and does **not** run `apt-get update`
 -v, --version
 ```
 
+Examples after installation:
+
+```bash
+vpsga
+vpsga --lang en
+vpsga --output-dir /root/audit-reports
+vpsga --rootkit-check
+vpsga --version
+```
+
 ### Baseline vs strict
 
 `baseline` is the default and avoids treating reasonable OpenSSH defaults as security failures. `strict` warns on settings such as root public-key login, `MaxAuthTries > 3`, and SSH TCP forwarding.
@@ -156,12 +179,28 @@ sudo ./vps-guard-audit.sh --config config/audit.conf
 
 Use the configuration file to mark trusted login IPs, intentional custom ports, the host profile, policy, and output limit.
 
-## Install system-wide
+## Manual system-wide installation
+
+From a cloned or downloaded repository:
 
 ```bash
 sudo ./install.sh
-sudo vps-guard-audit
+vpsga
 ```
+
+The installer keeps versioned program files under:
+
+```text
+/usr/local/lib/vps-guard-audit/releases/VERSION/
+```
+
+The current installation is selected through:
+
+```text
+/usr/local/lib/vps-guard-audit/current
+```
+
+The compatibility command `vps-guard-audit` remains available in `/usr/local/sbin`.
 
 ## Exit codes
 
@@ -172,9 +211,9 @@ sudo vps-guard-audit
 | 2 | Failures found |
 | 64 | Invalid option |
 | 65 | Interactive terminal unavailable |
-| 66 | Unreadable config |
-| 69 | Required audit files could not be downloaded |
-| 77 | Root required |
+| 66 | Unreadable config or incomplete installation source |
+| 69 | Required audit files could not be downloaded or installed |
+| 77 | Root privileges required |
 
 A warning or failure exit code is an audit result, not a script crash. Do not append `exit $?` inside an active SSH shell.
 
@@ -191,7 +230,7 @@ bash -n vps-guard-audit.sh bootstrap.sh install.sh lib/*.sh
 shellcheck vps-guard-audit.sh bootstrap.sh install.sh lib/*.sh
 ```
 
-GitHub Actions performs syntax checks, ShellCheck, JSON validation, and Chinese/English beginner-report smoke tests.
+GitHub Actions performs syntax checks, ShellCheck, JSON validation, Chinese/English beginner-report tests, and a system-wide `vpsga` installation smoke test.
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
