@@ -30,7 +30,7 @@ if [[ "$HAS_LANGUAGE" -eq 0 ]]; then
     exit 65
   fi
 
-  cat >/dev/tty <<'EOF'
+  cat >/dev/tty <<'EOF_LANGUAGE'
 ============================================================
                       VPS Guard Audit
 ============================================================
@@ -40,7 +40,7 @@ Please select a language / 请选择语言：
   1) 中文
   2) English
 
-EOF
+EOF_LANGUAGE
 
   while true; do
     printf "请输入选项 / Enter choice [1-2]: " >/dev/tty
@@ -73,6 +73,7 @@ MANAGER="$ROOT_DIR/vpsga-manager.sh"
   exit 69
 }
 chmod 0700 "$SCRIPT" "$INSTALLER" "$MANAGER"
+EXPECTED_VERSION="$(bash "$SCRIPT" --version)"
 
 echo "[3/4] Installing or updating the vpsga command..."
 if [[ "$(id -u)" -eq 0 ]]; then
@@ -87,6 +88,15 @@ fi
 
 [[ -x /usr/local/bin/vpsga ]] || {
   echo "Installation completed without creating /usr/local/bin/vpsga" >&2
+  exit 69
+}
+INSTALLED_VERSION="$(/usr/local/bin/vpsga --version 2>/dev/null || true)"
+[[ "$INSTALLED_VERSION" == "$EXPECTED_VERSION" ]] || {
+  echo "Installation verification failed: expected $EXPECTED_VERSION, got ${INSTALLED_VERSION:-unknown}" >&2
+  exit 69
+}
+/usr/local/bin/vpsga doctor >/dev/null || {
+  echo "Installation verification failed. Run: vpsga doctor" >&2
   exit 69
 }
 
