@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 SRC="$ROOT/vps-guard-audit.sh"
+MANAGER_SRC="$ROOT/vpsga-manager.sh"
 LIB_SRC="$ROOT/lib"
 INSTALL_ROOT="/usr/local/lib/vps-guard-audit"
 RELEASES_DIR="$INSTALL_ROOT/releases"
@@ -23,6 +24,7 @@ trap cleanup EXIT
   exit 77
 }
 [[ -f "$SRC" ]] || { echo "Missing: $SRC" >&2; exit 66; }
+[[ -f "$MANAGER_SRC" ]] || { echo "Missing: $MANAGER_SRC" >&2; exit 66; }
 [[ -d "$LIB_SRC" ]] || { echo "Missing: $LIB_SRC" >&2; exit 66; }
 
 VERSION="$(bash "$SRC" --version)"
@@ -34,6 +36,7 @@ VERSION="$(bash "$SRC" --version)"
 install -d -m 0755 "$RELEASES_DIR" /usr/local/bin /usr/local/sbin
 STAGE="$(mktemp -d "$RELEASES_DIR/.install-${VERSION}.XXXXXX")"
 install -m 0755 "$SRC" "$STAGE/vps-guard-audit.sh"
+install -m 0755 "$MANAGER_SRC" "$STAGE/vpsga-manager.sh"
 install -d -m 0755 "$STAGE/lib"
 install -m 0644 "$LIB_SRC"/*.sh "$STAGE/lib/"
 
@@ -48,13 +51,18 @@ cat >"$WRAPPER_TMP" <<'EOF_WRAPPER'
 #!/usr/bin/env bash
 set -euo pipefail
 
-TARGET="/usr/local/lib/vps-guard-audit/current/vps-guard-audit.sh"
-[[ -x "$TARGET" ]] || {
+CURRENT="/usr/local/lib/vps-guard-audit/current"
+TARGET="$CURRENT/vps-guard-audit.sh"
+MANAGER="$CURRENT/vpsga-manager.sh"
+[[ -x "$TARGET" && -x "$MANAGER" ]] || {
   echo "VPS Guard Audit is not installed correctly. Run the official one-command installer again." >&2
   exit 69
 }
 
 case "${1-}" in
+  doctor|update|open|serve|uninstall)
+    exec "$MANAGER" "$@"
+    ;;
   -h|--help|-v|--version)
     exec "$TARGET" "$@"
     ;;
@@ -74,10 +82,9 @@ EOF_WRAPPER
 install -m 0755 "$WRAPPER_TMP" "$VPSGA_BIN"
 install -m 0755 "$WRAPPER_TMP" "$COMPAT_BIN"
 
-# Remove files left by the earlier flat module layout after the new release is ready.
 find "$INSTALL_ROOT" -maxdepth 1 -type f -name '*.sh' -delete 2>/dev/null || true
 
 echo "Installed VPS Guard Audit $VERSION"
 echo "Command: vpsga"
 echo "Location: $RELEASE_DIR"
-echo "Reports will be saved in the directory where vpsga is run."
+echo "Reports are saved in the directory where vpsga is run."
