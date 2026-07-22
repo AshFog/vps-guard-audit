@@ -75,6 +75,9 @@ jobs:
           sudo ./install.sh
           test -x /usr/local/bin/vpsga
           test "$(vpsga --version)" = "4.4.0"
+          help_output="$(vpsga --help)"
+          grep -q 'vpsga \[options\]' <<<"$help_output"
+          ! grep -q 'sudo ./vps-guard-audit.sh' <<<"$help_output"
           vpsga doctor
           manager_help="$(/usr/local/lib/vps-guard-audit/current/vpsga-manager.sh --help)"
           grep -q 'vpsga update' <<<"$manager_help"
