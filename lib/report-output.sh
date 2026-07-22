@@ -192,20 +192,39 @@ print_history_comparison() {
   fi
 }
 
+finalize_report_ownership() {
+  local report output_owner
+  for report in "$FULL_REPORT" "$AI_REPORT" "$JSON_REPORT"; do
+    [[ -f "$report" ]] && chmod 0600 "$report" 2>/dev/null || true
+  done
+
+  [[ "${SUDO_UID:-}" =~ ^[0-9]+$ && "${SUDO_GID:-}" =~ ^[0-9]+$ ]] || return 0
+  [[ "$SUDO_UID" -ne 0 ]] || return 0
+  output_owner="$(stat -c %u "$OUTPUT_DIR" 2>/dev/null || true)"
+  [[ "$output_owner" == "$SUDO_UID" ]] || return 0
+
+  for report in "$FULL_REPORT" "$AI_REPORT" "$JSON_REPORT"; do
+    [[ -f "$report" ]] && chown "$SUDO_UID:$SUDO_GID" "$report" 2>/dev/null || true
+  done
+}
+
 save_history_state() {
   local idx title state_tmp state_file
-  [[ "$HISTORY_ENABLED" -eq 1 ]] || return 0
-  install -d -m 0700 "$HISTORY_DIR" 2>/dev/null || return 0
-  state_tmp="$TMP_DIR/current.state"
-  : >"$state_tmp"
-  for idx in "${!FINDING_IDS[@]}"; do
-    title="${FINDING_TITLES[$idx]//$'\t'/ }"
-    title="${title//$'\n'/ }"
-    printf '%s\t%s\t%s\n' "${FINDING_IDS[$idx]}" "${FINDING_LEVELS[$idx]}" "$title" >>"$state_tmp"
-  done
-  state_file="$HISTORY_DIR/vpsga-${STAMP}.state"
-  install -m 0600 "$state_tmp" "$state_file" 2>/dev/null || true
-  find "$HISTORY_DIR" -maxdepth 1 -type f -name 'vpsga-*.state' -printf '%f\n' 2>/dev/null \
-    | sort -r | tail -n +31 \
-    | while IFS= read -r old; do rm -f "$HISTORY_DIR/$old"; done
+  if [[ "$HISTORY_ENABLED" -eq 1 ]]; then
+    if install -d -m 0700 "$HISTORY_DIR" 2>/dev/null; then
+      state_tmp="$TMP_DIR/current.state"
+      : >"$state_tmp"
+      for idx in "${!FINDING_IDS[@]}"; do
+        title="${FINDING_TITLES[$idx]//$'\t'/ }"
+        title="${title//$'\n'/ }"
+        printf '%s\t%s\t%s\n' "${FINDING_IDS[$idx]}" "${FINDING_LEVELS[$idx]}" "$title" >>"$state_tmp"
+      done
+      state_file="$HISTORY_DIR/vpsga-${STAMP}.state"
+      install -m 0600 "$state_tmp" "$state_file" 2>/dev/null || true
+      find "$HISTORY_DIR" -maxdepth 1 -type f -name 'vpsga-*.state' -printf '%f\n' 2>/dev/null \
+        | sort -r | tail -n +31 \
+        | while IFS= read -r old; do rm -f "$HISTORY_DIR/$old"; done
+    fi
+  fi
+  finalize_report_ownership
 }
