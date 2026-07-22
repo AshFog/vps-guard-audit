@@ -2,13 +2,13 @@
 # VPS Guard Audit
 # Interactive bilingual, read-only security audit for new VPS users.
 # Supported: Ubuntu 26.04/24.04/22.04 LTS and Debian 13/12/11.
-# Version: 4.2.0
+# Version: 4.2.1
 
 set -uo pipefail
 IFS=$'\n\t'
 export LC_ALL=C LANG=C
 
-VERSION="4.2.0"
+VERSION="4.2.1"
 LANGUAGE=""
 OUTPUT_DIR="${PWD}"
 FORMAT="both"
@@ -89,10 +89,15 @@ if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
 fi
 
 choose_language() {
-  clear 2>/dev/null || true
-  cat <<'EOF'
+  local choice
+  if [[ ! -r /dev/tty || ! -w /dev/tty ]]; then
+    echo "Interactive terminal is unavailable. Run with --lang zh or --lang en." >&2
+    exit 65
+  fi
+
+  cat >/dev/tty <<'EOF'
 ============================================================
-             VPS Guard Audit / VPS 安全卫士
+                      VPS Guard Audit
 ============================================================
 
 Please select a language / 请选择语言：
@@ -102,12 +107,16 @@ Please select a language / 请选择语言：
 
 EOF
   while true; do
-    printf "请输入选项 / Enter choice [1-2]: "
-    read -r choice
+    printf "请输入选项 / Enter choice [1-2]: " >/dev/tty
+    if ! IFS= read -r choice </dev/tty; then
+      echo >&2
+      echo "Unable to read from the interactive terminal." >&2
+      exit 65
+    fi
     case "$choice" in
       1|zh|ZH|cn|CN|中文) LANGUAGE="zh"; break ;;
       2|en|EN|English|english) LANGUAGE="en"; break ;;
-      *) echo "无效选项，请输入 1 或 2。 / Invalid choice. Enter 1 or 2." ;;
+      *) echo "无效选项，请输入 1 或 2。 / Invalid choice. Enter 1 or 2." >/dev/tty ;;
     esac
   done
 }
@@ -122,8 +131,6 @@ ZH[readonly]="默认只读：不会修改防火墙、SSH、用户或系统配置
 EN[readonly]="Read-only by default: no firewall, SSH, user or system settings are changed; APT indexes refresh only with --refresh-package-index"
 ZH[start]="即将开始全面安全检测"
 EN[start]="The full security audit is about to begin"
-ZH[press]="按 Enter 键开始检测..."
-EN[press]="Press Enter to start..."
 ZH[system]="1. 操作系统支持状态与基础防护"
 EN[system]="1. OS support status and baseline protection"
 ZH[ports]="2. 全部接口监听端口与网络暴露"
@@ -172,13 +179,9 @@ t() {
   [[ "$LANGUAGE" == "zh" ]] && printf '%s' "${ZH[$key]}" || printf '%s' "${EN[$key]}"
 }
 
-if [[ -t 0 ]]; then
-  echo
-  echo "$(t readonly)"
-  echo "$(t start)"
-  printf "%s" "$(t press)"
-  read -r _
-fi
+echo
+echo "$(t readonly)"
+echo "$(t start)"
 
 mkdir -p "$OUTPUT_DIR"
 HOST="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo unknown)"
@@ -189,6 +192,7 @@ TMP_DIR="$(mktemp -d)"
 MODULE_TMP_DIR=""
 trap 'rm -rf "$TMP_DIR"; [[ -n "$MODULE_TMP_DIR" ]] && rm -rf "$MODULE_TMP_DIR"' EXIT
 
+# Generic defaults. Optional config can extend or override these.
 TRUSTED_LOGIN_IPS=""
 EXPECTED_UID0_USERS="root"
 CUSTOM_ALLOWED_TCP_PORTS=""
