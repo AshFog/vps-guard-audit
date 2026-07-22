@@ -1,0 +1,107 @@
+name: Publish v4.4.0
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-v4.4.0.yml
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_SHA: 5b849a4bf79d6a843b147b4e4f0fa8f0a8248dc5
+      TAG_NAME: v4.4.0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify release source
+        run: |
+          set -euo pipefail
+          git cat-file -e "$TARGET_SHA^{commit}"
+          test "$(git show "$TARGET_SHA:vps-guard-audit.sh" | sed -n 's/^VERSION="\([^"]*\)"/\1/p' | head -n1)" = "4.4.0"
+          git show "$TARGET_SHA:README.md" >/dev/null
+          git show "$TARGET_SHA:README.zh-CN.md" >/dev/null
+          git show "$TARGET_SHA:CHANGELOG.md" | grep -q '^## 4\.4\.0'
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Release $TAG_NAME already exists" >&2
+            exit 1
+          fi
+
+      - name: Build release archives
+        run: |
+          set -euo pipefail
+          prefix="vps-guard-audit-4.4.0/"
+          git archive --format=tar.gz --prefix="$prefix" "$TARGET_SHA" -o vps-guard-audit-4.4.0.tar.gz
+          git archive --format=zip --prefix="$prefix" "$TARGET_SHA" -o vps-guard-audit-4.4.0.zip
+          sha256sum vps-guard-audit-4.4.0.tar.gz vps-guard-audit-4.4.0.zip > SHA256SUMS
+
+      - name: Write release notes
+        run: |
+          cat >"$RUNNER_TEMP/release-notes.md" <<'EOF_NOTES'
+          ## VPS Guard Audit v4.4.0
+
+          A stable bilingual security-audit release for Ubuntu and Debian, focused on reliable installation, clearer reports, safer AI handoff, and repeatable audits.
+
+          ### Highlights
+
+          - Global `vpsga` command with versioned installation under `/usr/local/lib/vps-guard-audit`.
+          - Fixed first-run installation for both clean systems and older layouts where `current` was a real directory.
+          - Fixed release-directory permissions so non-root users can launch `vpsga` normally before sudo elevation.
+          - Full TXT, AI-redacted TXT, and JSON report bundles with matching timestamps.
+          - Previous-audit comparison for new, resolved, and severity-changed findings.
+          - `vpsga doctor`, `vpsga update`, and `vpsga uninstall` management commands.
+          - Separate English and Simplified Chinese documentation.
+          - CI coverage for syntax, ShellCheck, bilingual reports, JSON output, history, clean installation, legacy migration, non-root execution, and report ownership.
+
+          ### First installation
+
+          ```bash
+          curl -fsSL https://raw.githubusercontent.com/AshFog/vps-guard-audit/main/bootstrap.sh | bash
+          ```
+
+          Later runs:
+
+          ```bash
+          vpsga
+          ```
+
+          ### Supported systems
+
+          - Ubuntu 26.04, 24.04, and 22.04 LTS
+          - Debian 13, 12, and 11
+
+          ### Downloads
+
+          - `vps-guard-audit-4.4.0.tar.gz`
+          - `vps-guard-audit-4.4.0.zip`
+          - `SHA256SUMS`
+
+          Full details are available in `CHANGELOG.md`.
+          EOF_NOTES
+
+      - name: Publish GitHub release
+        run: |
+          set -euo pipefail
+          gh release create "$TAG_NAME" \
+            --target "$TARGET_SHA" \
+            --title "VPS Guard Audit v4.4.0" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            vps-guard-audit-4.4.0.tar.gz \
+            vps-guard-audit-4.4.0.zip \
+            SHA256SUMS
+
+      - name: Verify published release
+        run: |
+          set -euo pipefail
+          test "$(gh release view "$TAG_NAME" --json tagName,isDraft,isPrerelease --jq '.tagName')" = "$TAG_NAME"
+          test "$(gh release view "$TAG_NAME" --json isDraft --jq '.isDraft')" = "false"
+          test "$(gh release view "$TAG_NAME" --json isPrerelease --jq '.isPrerelease')" = "false"
+          test "$(gh release view "$TAG_NAME" --json assets --jq '.assets | length')" -eq 3
