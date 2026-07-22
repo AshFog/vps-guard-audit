@@ -5,17 +5,6 @@ INSTALL_ROOT="/usr/local/lib/vps-guard-audit"
 CURRENT="$INSTALL_ROOT/current"
 ARCHIVE_URL="https://github.com/AshFog/vps-guard-audit/archive/refs/heads/main.tar.gz"
 
-latest_html() {
-  local path="${1:-$PWD}"
-  if [[ -f "$path" && "$path" == *.html ]]; then
-    readlink -f "$path" 2>/dev/null || printf '%s\n' "$path"
-    return 0
-  fi
-  [[ -d "$path" ]] || { echo "Directory not found: $path" >&2; return 66; }
-  find "$path" -maxdepth 1 -type f -name 'vpsga-*.html' -printf '%T@\t%p\n' 2>/dev/null \
-    | sort -nr | head -n1 | cut -f2-
-}
-
 need_root() {
   if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
     return 0
@@ -110,60 +99,11 @@ cmd_uninstall() {
   fi
 }
 
-cmd_open() {
-  local report
-  report="$(latest_html "${1:-$PWD}")"
-  [[ -n "$report" && -f "$report" ]] || { echo "No vpsga HTML report was found." >&2; exit 66; }
-  if command -v xdg-open >/dev/null 2>&1 && [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
-    xdg-open "$report" >/dev/null 2>&1 &
-    echo "Opened: file://$report"
-  elif command -v gio >/dev/null 2>&1 && [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
-    gio open "$report" >/dev/null 2>&1 &
-    echo "Opened: file://$report"
-  else
-    echo "HTML report: file://$report"
-    echo "No local graphical browser was detected. For an SSH session, use:"
-    echo "  vpsga serve \"$(dirname "$report")\""
-  fi
-}
-
-cmd_serve() {
-  local path="${1:-$PWD}" port="${2:-8765}" report dir name python_bin
-  [[ "$port" =~ ^[0-9]+$ ]] && ((port >= 1024 && port <= 65535)) || {
-    echo "Port must be an integer between 1024 and 65535." >&2
-    exit 64
-  }
-  report="$(latest_html "$path")"
-  [[ -n "$report" && -f "$report" ]] || { echo "No vpsga HTML report was found." >&2; exit 66; }
-  dir="$(dirname "$report")"
-  name="$(basename "$report")"
-  if command -v python3 >/dev/null 2>&1; then python_bin=python3; elif command -v python >/dev/null 2>&1; then python_bin=python; else
-    echo "Python is required for the local report server." >&2
-    exit 69
-  fi
-
-  echo "Serving reports from: $dir"
-  echo "Open: http://127.0.0.1:$port/$name"
-  echo "The server listens on 127.0.0.1 only and is not exposed publicly."
-  if [[ -n "${SSH_CONNECTION:-}" ]]; then
-    echo
-    echo "This is an SSH session. On your own computer, create a tunnel first:"
-    echo "  ssh -L $port:127.0.0.1:$port USER@SERVER"
-    echo "Then open the URL above in your local browser."
-  fi
-  echo "Press Ctrl+C to stop."
-  cd "$dir"
-  exec "$python_bin" -m http.server "$port" --bind 127.0.0.1
-}
-
 usage() {
   cat <<'EOF_USAGE'
 VPS Guard Audit management commands:
   vpsga doctor                 Check the installed program
   vpsga update                 Install the current upstream version
-  vpsga open [FILE|DIR]        Open the latest HTML report on a local desktop
-  vpsga serve [FILE|DIR] [PORT]
-                               Serve the latest HTML report on 127.0.0.1
   vpsga uninstall              Remove the installed program
 EOF_USAGE
 }
@@ -171,8 +111,6 @@ EOF_USAGE
 case "${1:-}" in
   doctor) shift; cmd_doctor "$@" ;;
   update) shift; cmd_update "$@" ;;
-  open) shift; cmd_open "$@" ;;
-  serve) shift; cmd_serve "$@" ;;
   uninstall) shift; cmd_uninstall "$@" ;;
   -h|--help|help|"") usage ;;
   *) echo "Unknown management command: $1" >&2; usage >&2; exit 64 ;;
