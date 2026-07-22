@@ -2,12 +2,12 @@
 # VPS Guard Audit
 # Interactive bilingual, read-only security audit for new VPS users.
 # Supported: Ubuntu 26.04/24.04/22.04 LTS and Debian 13/12/11.
-# Version: 4.0.0
+# Version: 4.1.0
 
 set -uo pipefail
 IFS=$'\n\t'
 
-VERSION="4.0.0"
+VERSION="4.1.0"
 LANGUAGE=""
 OUTPUT_DIR="${PWD}"
 FORMAT="both"
@@ -269,31 +269,65 @@ run_audit() {
   SOCKETS="$(ss -H -lntup 2>/dev/null || true)"
   echo "$SOCKETS"
   public_count=0
-  while read -r proto state recvq sendq local peer rest; do
-    [[ -z "${proto:-}" ]] && continue
-    port="${local##*:}"; port="${port//]/}"
-    addr="${local%:*}"
-    if [[ "$addr" == "0.0.0.0" || "$addr" == "*" || "$addr" == "[::]" || "$addr" == "::" ]]; then
+  declare -A PUBLIC_LISTENERS=()
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    proto="$(awk '{print $1}' <<<"$line")"
+    local_ep="$(awk '{print $5}' <<<"$line")"
+    process="$(sed -E 's/^([^[:space:]]+[[:space:]]+){6}//' <<<"$line")"
+    addr=""; port=""
+    if [[ "$local_ep" =~ ^\[(.*)\]:([0-9]+)$ ]]; then
+      addr="${BASH_REMATCH[1]}"; port="${BASH_REMATCH[2]}"
+    elif [[ "$local_ep" =~ ^(.+):([0-9]+)$ ]]; then
+      addr="${BASH_REMATCH[1]}"; port="${BASH_REMATCH[2]}"
+    fi
+    [[ -z "$port" ]] && continue
+    if [[ "$addr" == "0.0.0.0" || "$addr" == "*" || "$addr" == "::" ]]; then
       public_count=$((public_count+1))
+      base_proto="${proto%%[0-9]*}"
+      PUBLIC_LISTENERS["${base_proto}/${port}"]=1
       known=""
-      case "${proto}/${port}" in
+      case "${base_proto}/${port}" in
         tcp/22|tcp/80|tcp/443|udp/443) known=1 ;;
       esac
-      [[ "$proto" == tcp* ]] && contains_word "$CUSTOM_ALLOWED_TCP_PORTS" "$port" && known=1
-      [[ "$proto" == udp* ]] && contains_word "$CUSTOM_ALLOWED_UDP_PORTS" "$port" && known=1
-      if [[ -n "$known" ]]; then
-        record INFO "port.${proto}.${port}" "发现常见公网监听端口 ${proto}/${port}" "Common public listener detected: ${proto}/${port}" "$rest"
-      else
-        record WARN "port.${proto}.${port}" "发现需要确认的公网监听端口 ${proto}/${port}" "Public listener requires review: ${proto}/${port}" "$rest" \
-          "确认该端口对应你安装的服务；不需要时关闭服务并删除防火墙放行。" \
-          "Confirm the service is intentional; otherwise stop it and remove the firewall rule."
-      fi
+      [[ "$base_proto" == tcp ]] && contains_word "$CUSTOM_ALLOWED_TCP_PORTS" "$port" && known=1
+      [[ "$base_proto" == udp ]] && contains_word "$CUSTOM_ALLOWED_UDP_PORTS" "$port" && known=1
+
+      case "${base_proto}/${port}" in
+        tcp/631)
+          record FAIL "port.cups.${port}" "CUPS 打印服务正在公网监听 tcp/${port}" "CUPS print service is publicly listening on tcp/${port}" "$process" \
+            "普通 VPS 通常不需要 CUPS；确认无打印需求后停止并卸载对应 apt 或 Snap 服务。" \
+            "Most VPS hosts do not need CUPS; stop and remove the apt or Snap service if printing is not required."
+          ;;
+        tcp/2375|tcp/2376)
+          record FAIL "port.docker_api.${port}" "Docker API 正在公网监听 tcp/${port}" "Docker API is publicly listening on tcp/${port}" "$process" \
+            "立即限制 Docker API 的访问范围，并使用双向 TLS 或仅绑定本机。" \
+            "Restrict Docker API exposure immediately and use mutual TLS or bind it locally only."
+          ;;
+        tcp/3306|tcp/5432|tcp/6379|tcp/9200|tcp/27017)
+          record WARN "port.database.${port}" "数据库或数据服务正在公网监听 ${base_proto}/${port}" "Database or data service is publicly listening on ${base_proto}/${port}" "$process" \
+            "确认确需公网访问，并限制来源 IP；否则改为仅监听本机或私网。" \
+            "Confirm public access is required and restrict source IPs; otherwise bind locally or to a private network."
+          ;;
+        *)
+          if [[ -n "$known" ]]; then
+            record INFO "port.${base_proto}.${port}" "发现预期或常见公网监听端口 ${base_proto}/${port}" "Expected or common public listener detected: ${base_proto}/${port}" "$process"
+          else
+            record WARN "port.${base_proto}.${port}" "发现需要确认的公网监听端口 ${base_proto}/${port}" "Public listener requires review: ${base_proto}/${port}" "$process" \
+              "确认该端口对应你安装的服务；不需要时关闭服务并删除防火墙放行。" \
+              "Confirm the service is intentional; otherwise stop it and remove the firewall rule."
+          fi
+          ;;
+      esac
     fi
   done <<<"$SOCKETS"
-  ((public_count == 0)) && record PASS ports.none "未发现公网监听端口" "No public listeners detected"
+  ((public_count == 0)) \
+    && record PASS ports.none "未发现公网监听端口" "No public listeners detected" \
+    || record INFO ports.count "公网监听端口统计" "Public listener count" "$public_count"
 
   section "$(t firewall)"
   firewall_ok=0
+  UFW=""
   if have ufw; then
     UFW="$(ufw status verbose 2>/dev/null || true)"
     echo "$UFW"
@@ -305,14 +339,50 @@ run_audit() {
     grep -q 'Default: deny (incoming)' <<<"$UFW" \
       && record PASS fw.ufw.default "UFW 默认拒绝入站连接" "UFW default incoming policy is deny" \
       || record WARN fw.ufw.default "UFW 默认入站策略不是 deny" "UFW default incoming policy is not deny"
+    systemctl is-enabled --quiet ufw 2>/dev/null \
+      && record PASS fw.ufw.enabled "UFW 已设置开机启动" "UFW is enabled at boot" \
+      || record WARN fw.ufw.enabled "UFW 未设置开机启动" "UFW is not enabled at boot"
+
+    stale_rules=()
+    while IFS= read -r rule; do
+      [[ "$rule" == *"(v6)"* ]] && continue
+      target="$(awk '{print $1}' <<<"$rule")"
+      [[ "$target" =~ ^([0-9]+)/(tcp|udp)$ ]] || continue
+      port="${BASH_REMATCH[1]}"; proto="${BASH_REMATCH[2]}"
+      [[ -n "${PUBLIC_LISTENERS["${proto}/${port}"]+x}" ]] || stale_rules+=("${proto}/${port}")
+    done < <(awk '$2=="ALLOW" && $3=="IN" {print}' <<<"$UFW")
+    if ((${#stale_rules[@]})); then
+      stale_joined="$(printf '%s\n' "${stale_rules[@]}" | sort -u | xargs)"
+      record WARN fw.ufw.stale "发现已放行但当前无人监听的 UFW 端口" "UFW allows ports with no current listener" "$stale_joined" \
+        "确认这些端口是否仍需保留；不需要时删除对应 UFW 规则。" \
+        "Confirm whether these ports are still needed; remove stale UFW rules when unnecessary."
+    else
+      record PASS fw.ufw.stale "未发现明显陈旧的 UFW 放行端口" "No obvious stale UFW allow rules detected"
+    fi
   else
     record INFO fw.ufw.absent "系统未安装 UFW" "UFW is not installed"
   fi
+
   IPT="$(iptables -S INPUT 2>/dev/null || true)"
   echo "$IPT"
   grep -q '^-P INPUT DROP' <<<"$IPT" \
     && { record PASS fw.iptables.input "iptables INPUT 默认策略为 DROP" "iptables INPUT policy is DROP"; firewall_ok=1; } \
     || record WARN fw.iptables.input "iptables INPUT 默认策略不是 DROP" "iptables INPUT policy is not DROP"
+
+  pre_ufw_accept="$(awk '
+    /-j ufw-before-logging-input|-j ufw-before-input/ {exit}
+    /^-A INPUT / && / -j ACCEPT([[:space:]]|$)/ {print}
+  ' <<<"$IPT")"
+  if [[ -n "$pre_ufw_accept" ]]; then
+    count="$(wc -l <<<"$pre_ufw_accept" | tr -d ' ')"
+    record WARN fw.pre_ufw_accept "发现位于 UFW 链之前的额外 ACCEPT 规则" "Extra ACCEPT rules exist before UFW chains" "$count rule(s)" \
+      "这些规则可能绕过 UFW；确认来源后再删除或迁移到 UFW。" \
+      "These rules may bypass UFW; verify their source before removing or migrating them."
+    echo "$pre_ufw_accept"
+  else
+    record PASS fw.pre_ufw_accept "未发现位于 UFW 链之前的额外 ACCEPT 规则" "No extra ACCEPT rules were found before UFW chains"
+  fi
+
   ((firewall_ok == 1)) || record FAIL fw.none "未确认存在默认拒绝策略的主机防火墙" "No confirmed default-deny host firewall" "" \
     "至少配置一种主机防火墙，并采用默认拒绝入站策略。" \
     "Configure a host firewall with a default-deny incoming policy."
@@ -324,7 +394,7 @@ run_audit() {
     sshval() { awk -v k="$1" '$1==k {print $2; exit}' <<<"$SSHD"; }
     [[ "$(sshval passwordauthentication)" == no ]] \
       && record PASS ssh.password "SSH 密码登录已关闭" "SSH password authentication is disabled" \
-      || record FAIL ssh.password "SSH 密码登录仍然开启" "SSH password authentication is enabled" "" \
+      || record FAIL ssh.password "SSH 密码登录仍然开媯" "SSH password authentication is enabled" "" \
         "先确认密钥登录可用，再关闭 PasswordAuthentication。" \
         "Verify key login first, then disable PasswordAuthentication."
     [[ "$(sshval pubkeyauthentication)" == yes ]] \
@@ -365,8 +435,18 @@ run_audit() {
     systemctl is-active --quiet fail2ban 2>/dev/null \
       && record PASS f2b.active "Fail2ban 正在运行" "Fail2ban is active" \
       || record FAIL f2b.active "Fail2ban 未运行" "Fail2ban is inactive"
-    safe fail2ban-client status
-    safe fail2ban-client status sshd
+    F2B_STATUS="$(fail2ban-client status 2>/dev/null || true)"
+    echo "$F2B_STATUS"
+    if grep -q 'Jail list:.*sshd' <<<"$F2B_STATUS"; then
+      SSHD_JAIL="$(fail2ban-client status sshd 2>/dev/null || true)"
+      echo "$SSHD_JAIL" | grep -v 'Banned IP list:' || true
+      banned_count="$(awk -F: '/Currently banned:/ {gsub(/[[:space:]]/,"",$2); print $2; exit}' <<<"$SSHD_JAIL")"
+      banned_ips="$(sed -n 's/.*Banned IP list:[[:space:]]*//p' <<<"$SSHD_JAIL")"
+      sample="$(tr ' ' '\n' <<<"$banned_ips" | sed '/^$/d' | head -n 20 | xargs)"
+      [[ -n "$banned_count" ]] && echo "Banned IP sample (up to 20 of ${banned_count}): ${sample:-none}"
+    else
+      record WARN f2b.sshd_jail "Fail2ban 未启用 sshd jail" "Fail2ban sshd jail is not enabled"
+    fi
   else
     record WARN f2b.absent "未安装 Fail2ban" "Fail2ban is not installed" "" \
       "新手公网 VPS 建议安装 Fail2ban，并至少启用 sshd jail。" \
