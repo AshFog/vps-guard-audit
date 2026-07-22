@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # VPS Guard Audit
-# Interactive bilingual, read-only security audit for new VPS users.
+# Interactive bilingual, read-only security audit.
 # Supported: Ubuntu 26.04/24.04/22.04 LTS and Debian 13/12/11.
-# Version: 4.3.0
+# Version: 4.4.0
 
 set -uo pipefail
 IFS=$'\n\t'
 export LC_ALL=C LANG=C
 
-VERSION="4.3.0"
+VERSION="4.4.0"
 LANGUAGE=""
 OUTPUT_DIR="${PWD}"
 FORMAT="both"
@@ -22,6 +22,7 @@ PROFILE="auto"
 POLICY="baseline"
 FULL_IDENTIFIERS=0
 MAX_LIST_ITEMS=20
+HISTORY_ENABLED=1
 
 PASS=0
 WARN=0
@@ -40,7 +41,7 @@ declare -a FINDING_DETAILS=()
 declare -a FINDING_RECOMMENDATIONS=()
 
 usage() {
-  cat <<'EOF'
+  cat <<'EOF_USAGE'
 Usage:
   sudo ./vps-guard-audit.sh
 
@@ -56,10 +57,11 @@ Options:
   --policy baseline|strict
   --full-identifiers
   --rootkit-check
+  --no-history
   --quiet
   -h, --help
   -v, --version
-EOF
+EOF_USAGE
 }
 
 while (($#)); do
@@ -75,6 +77,7 @@ while (($#)); do
     --policy) POLICY="${2:?missing policy}"; shift 2 ;;
     --full-identifiers) FULL_IDENTIFIERS=1; shift ;;
     --rootkit-check) CHECK_ROOTKITS=1; shift ;;
+    --no-history) HISTORY_ENABLED=0; shift ;;
     --quiet) QUIET=1; shift ;;
     -h|--help) usage; exit 0 ;;
     -v|--version) echo "$VERSION"; exit 0 ;;
@@ -100,7 +103,7 @@ choose_language() {
     exit 65
   fi
 
-  cat >/dev/tty <<'EOF'
+  cat >/dev/tty <<'EOF_LANGUAGE'
 ============================================================
                       VPS Guard Audit
 ============================================================
@@ -110,7 +113,7 @@ Please select a language / 请选择语言：
   1) 中文
   2) English
 
-EOF
+EOF_LANGUAGE
   while true; do
     printf "请输入选项 / Enter choice [1-2]: " >/dev/tty
     if ! IFS= read -r choice </dev/tty; then
@@ -188,10 +191,13 @@ echo "$(t readonly)"
 echo "$(t start)"
 
 mkdir -p "$OUTPUT_DIR"
+OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd -P)"
 HOST="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo unknown)"
 STAMP="$(date +%Y%m%d-%H%M%S)"
-TEXT_REPORT="${OUTPUT_DIR}/vps-guard-audit-${HOST}-${STAMP}-${LANGUAGE}.txt"
-JSON_REPORT="${OUTPUT_DIR}/vps-guard-audit-${HOST}-${STAMP}-${LANGUAGE}.json"
+FULL_REPORT="${OUTPUT_DIR}/vpsga-${STAMP}-full.txt"
+AI_REPORT="${OUTPUT_DIR}/vpsga-${STAMP}-ai.txt"
+JSON_REPORT="${OUTPUT_DIR}/vpsga-${STAMP}.json"
+HTML_REPORT="${OUTPUT_DIR}/vpsga-${STAMP}.html"
 TMP_DIR="$(mktemp -d)"
 MODULE_TMP_DIR=""
 trap 'rm -rf "$TMP_DIR"; [[ -n "$MODULE_TMP_DIR" ]] && rm -rf "$MODULE_TMP_DIR"' EXIT
@@ -310,14 +316,14 @@ load_audit_modules() {
   script_dir="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
   if [[ -d "$script_dir/lib" ]]; then
     lib_dir="$script_dir/lib"
-  elif [[ -d /usr/local/lib/vps-guard-audit ]]; then
-    lib_dir="/usr/local/lib/vps-guard-audit"
+  elif [[ -d /usr/local/lib/vps-guard-audit/current/lib ]]; then
+    lib_dir="/usr/local/lib/vps-guard-audit/current/lib"
   else
     have curl || { echo "curl is required to download audit modules" >&2; exit 69; }
     tmp_lib="$(mktemp -d)"
     MODULE_TMP_DIR="$tmp_lib"
     base_url="${VPS_GUARD_BASE_URL:-https://raw.githubusercontent.com/AshFog/vps-guard-audit/main/lib}"
-    for module in audit-platform.sh audit-access.sh audit-system.sh audit-containers.sh report-guidance-zh.sh report-guidance-en.sh report-guidance.sh audit-summary.sh; do
+    for module in audit-platform.sh audit-access.sh audit-system.sh audit-containers.sh report-guidance-zh.sh report-guidance-en.sh report-guidance.sh report-output.sh audit-summary.sh; do
       curl -fsSL "$base_url/$module" -o "$tmp_lib/$module" || {
         echo "Failed to download module: $module" >&2
         exit 69
@@ -325,7 +331,7 @@ load_audit_modules() {
     done
     lib_dir="$tmp_lib"
   fi
-  for module in audit-platform.sh audit-access.sh audit-system.sh audit-containers.sh report-guidance-zh.sh report-guidance-en.sh report-guidance.sh audit-summary.sh; do
+  for module in audit-platform.sh audit-access.sh audit-system.sh audit-containers.sh report-guidance-zh.sh report-guidance-en.sh report-guidance.sh report-output.sh audit-summary.sh; do
     # shellcheck disable=SC1090
     source "$lib_dir/$module"
   done
@@ -348,15 +354,16 @@ run_audit() {
 }
 
 if [[ "$QUIET" -eq 1 ]]; then
-  run_audit >"$TEXT_REPORT" 2>&1
+  run_audit >"$FULL_REPORT" 2>&1
 else
   AUDIT_PIPE="$TMP_DIR/audit.pipe"
   mkfifo "$AUDIT_PIPE"
-  tee "$TEXT_REPORT" <"$AUDIT_PIPE" &
+  tee "$FULL_REPORT" <"$AUDIT_PIPE" &
   TEE_PID=$!
   run_audit >"$AUDIT_PIPE" 2>&1
   wait "$TEE_PID"
 fi
+chmod 0600 "$FULL_REPORT" 2>/dev/null || true
 
 if [[ "$FORMAT" == json || "$FORMAT" == both ]]; then
   {
@@ -380,17 +387,35 @@ if [[ "$FORMAT" == json || "$FORMAT" == both ]]; then
     echo '  ]'
     echo '}'
   } >"$JSON_REPORT"
+  chmod 0600 "$JSON_REPORT" 2>/dev/null || true
 fi
 
-[[ "$FORMAT" == json ]] && rm -f "$TEXT_REPORT"
-[[ "$FORMAT" == text ]] && rm -f "$JSON_REPORT"
+if [[ "$FORMAT" == text || "$FORMAT" == both ]]; then
+  generate_ai_report
+  generate_html_report
+fi
+save_history_state
+
+if [[ "$FORMAT" == json ]]; then
+  rm -f "$FULL_REPORT" "$AI_REPORT" "$HTML_REPORT"
+elif [[ "$FORMAT" == text ]]; then
+  rm -f "$JSON_REPORT"
+fi
 
 echo
 echo "============================================================"
 echo "$(t done)"
 echo "$(t reports):"
-[[ -f "$TEXT_REPORT" ]] && echo "  TXT : $TEXT_REPORT"
+[[ -f "$FULL_REPORT" ]] && echo "  FULL: $FULL_REPORT"
+[[ -f "$AI_REPORT" ]] && echo "  AI  : $AI_REPORT"
 [[ -f "$JSON_REPORT" ]] && echo "  JSON: $JSON_REPORT"
+if [[ -f "$HTML_REPORT" ]]; then
+  echo "  HTML: $HTML_REPORT"
+  echo "  OPEN: $(file_url "$HTML_REPORT")"
+  if command -v vpsga >/dev/null 2>&1; then
+    [[ "$LANGUAGE" == zh ]] && echo "  浏览器查看：vpsga open 或 vpsga serve" || echo "  Browser view: vpsga open or vpsga serve"
+  fi
+fi
 echo "============================================================"
 
 if ((FAIL > 0)); then exit 2
