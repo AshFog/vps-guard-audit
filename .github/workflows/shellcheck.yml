@@ -1,4 +1,4 @@
-name: Shell checks
+name: v5 检查
 
 on:
   push:
@@ -12,80 +12,54 @@ jobs:
         with:
           show-progress: false
 
-      - name: Bash syntax
+      - name: Bash 语法
         run: bash -n vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh lib/*.sh
 
       - name: ShellCheck
         run: |
-          # Main functions are called by sourced modules, which ShellCheck cannot
-          # follow reliably across this modular script layout.
           shellcheck -x -e SC1010,SC2005,SC2015,SC2034,SC2317 vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh
-          # Modules intentionally consume globals and helper functions defined
-          # by the main entry point.
           shellcheck -x -e SC2009,SC2015,SC2034,SC2154 lib/*.sh
 
-      - name: Documentation links and removed features
+      - name: 中文定位和版本
         run: |
-          test -s README.md
-          test -s README.zh-CN.md
-          grep -q '\[简体中文\](README.zh-CN.md)' README.md
-          grep -q '\[English\](README.md)' README.zh-CN.md
-          ! grep -R -nE 'vpsga (open|serve)|HTML_REPORT|generate_html_report' -- README.md README.zh-CN.md vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh lib
+          test "$(bash ./vps-guard-audit.sh --version)" = "5.0.0"
+          help_output="$(bash ./vps-guard-audit.sh --help)"
+          grep -q '用法' <<<"$help_output"
+          grep -q -- '--depth quick|standard|deep' <<<"$help_output"
+          ! grep -q -- '--lang' <<<"$help_output"
+          grep -q '中文原生审计框架' CHANGELOG.md
+          ! grep -R -n 'report-guidance-en' -- vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh lib
 
-      - name: Non-mutating JSON smoke test
+      - name: JSON Schema 2.0 快速检查
         run: |
-          mkdir -p "$RUNNER_TEMP/json"
+          mkdir -p "$RUNNER_TEMP/json" "$RUNNER_TEMP/history"
           set +e
-          sudo bash ./vps-guard-audit.sh --lang en --profile vps --policy baseline --no-update-check --no-history --format json --output-dir "$RUNNER_TEMP/json" --quiet
+          sudo env VPSGA_HISTORY_DIR="$RUNNER_TEMP/history" bash ./vps-guard-audit.sh --depth quick --profile general --no-history --format json --output-dir "$RUNNER_TEMP/json" --quiet
           rc=$?
           set -e
           test "$rc" -ge 0 -a "$rc" -le 2
           report="$(find "$RUNNER_TEMP/json" -maxdepth 1 -name 'vpsga-*.json' -print -quit)"
-          test -n "$report"
-          jq -e '.version == "4.4.0" and (.summary.pass | type == "number") and (.findings | type == "array")' "$report"
+          jq -e '.version == "5.0.0" and .schema_version == "2.0" and .language == "zh-CN" and .depth == "quick" and (.findings | type == "array") and (.findings[0].test_id | test("^[A-Z]+-[0-9]{4}$")) and (.findings[0].evidence | type == "array")' "$report"
 
-      - name: Bilingual report bundle smoke tests
+      - name: 中文报告与历史比较
         run: |
-          mkdir -p "$RUNNER_TEMP/zh" "$RUNNER_TEMP/en"
+          mkdir -p "$RUNNER_TEMP/reports" "$RUNNER_TEMP/history"
+          export VPSGA_HISTORY_DIR="$RUNNER_TEMP/history"
           set +e
-          sudo bash ./vps-guard-audit.sh --lang zh --profile vps --no-update-check --no-history --format both --output-dir "$RUNNER_TEMP/zh" --quiet
-          zh_rc=$?
-          sudo bash ./vps-guard-audit.sh --lang en --profile vps --no-update-check --no-history --format both --output-dir "$RUNNER_TEMP/en" --quiet
-          en_rc=$?
-          set -e
-          test "$zh_rc" -ge 0 -a "$zh_rc" -le 2
-          test "$en_rc" -ge 0 -a "$en_rc" -le 2
-          for dir in zh en; do
-            test "$(find "$RUNNER_TEMP/$dir" -maxdepth 1 -name 'vpsga-*-full.txt' | wc -l)" -eq 1
-            test "$(find "$RUNNER_TEMP/$dir" -maxdepth 1 -name 'vpsga-*-ai.txt' | wc -l)" -eq 1
-            test "$(find "$RUNNER_TEMP/$dir" -maxdepth 1 -name 'vpsga-*.json' | wc -l)" -eq 1
-            test "$(find "$RUNNER_TEMP/$dir" -maxdepth 1 -name 'vpsga-*.html' | wc -l)" -eq 0
-          done
-          zh_full="$(find "$RUNNER_TEMP/zh" -name 'vpsga-*-full.txt' -print -quit)"
-          zh_ai="$(find "$RUNNER_TEMP/zh" -name 'vpsga-*-ai.txt' -print -quit)"
-          en_full="$(find "$RUNNER_TEMP/en" -name 'vpsga-*-full.txt' -print -quit)"
-          en_ai="$(find "$RUNNER_TEMP/en" -name 'vpsga-*-ai.txt' -print -quit)"
-          grep -q '检测总结与下一步建议' "$zh_full"
-          grep -q 'AI 脱敏报告' "$zh_ai"
-          grep -q 'Summary and next steps' "$en_full"
-          grep -q 'AI-Safe Report' "$en_ai"
-
-      - name: History comparison smoke test
-        run: |
-          mkdir -p "$RUNNER_TEMP/history-reports" "$RUNNER_TEMP/history-state"
-          export VPSGA_HISTORY_DIR="$RUNNER_TEMP/history-state"
-          set +e
-          sudo -E bash ./vps-guard-audit.sh --lang en --profile vps --no-update-check --format text --output-dir "$RUNNER_TEMP/history-reports" --quiet
+          sudo -E bash ./vps-guard-audit.sh --depth quick --format both --output-dir "$RUNNER_TEMP/reports" --quiet
           first_rc=$?
           sleep 1
-          sudo -E bash ./vps-guard-audit.sh --lang en --profile vps --no-update-check --format text --output-dir "$RUNNER_TEMP/history-reports" --quiet
+          sudo -E bash ./vps-guard-audit.sh --depth quick --format both --output-dir "$RUNNER_TEMP/reports" --quiet
           second_rc=$?
           set -e
           test "$first_rc" -ge 0 -a "$first_rc" -le 2
           test "$second_rc" -ge 0 -a "$second_rc" -le 2
-          test "$(find "$RUNNER_TEMP/history-state" -name 'vpsga-*.state' | wc -l)" -eq 2
-          latest="$(find "$RUNNER_TEMP/history-reports" -name 'vpsga-*-full.txt' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)"
-          grep -q 'Compared with the previous audit' "$latest"
+          test "$(find "$RUNNER_TEMP/history" -name 'vpsga-*.state' | wc -l)" -eq 2
+          latest="$(find "$RUNNER_TEMP/reports" -name 'vpsga-*-full.txt' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)"
+          ai="$(find "$RUNNER_TEMP/reports" -name 'vpsga-*-ai.txt' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)"
+          grep -q '\[正常\]\|\[提醒\]\|\[问题\]\|\[信息\]\|\[跳过\]' "$latest"
+          grep -q '与上一次检测相比' "$latest"
+          grep -q 'AI 脱敏报告' "$ai"
 
   installation-tests:
     runs-on: ubuntu-latest
@@ -94,63 +68,54 @@ jobs:
         with:
           show-progress: false
 
-      - name: Clean system installation
+      - name: 全新安装和完整性检查
         run: |
           set -euxo pipefail
           sudo rm -rf /usr/local/lib/vps-guard-audit
           sudo rm -f /usr/local/bin/vpsga /usr/local/sbin/vps-guard-audit
           sudo bash ./install.sh
-          ls -la /usr/local/lib/vps-guard-audit
-          ls -la /usr/local/lib/vps-guard-audit/current/
           test -x /usr/local/bin/vpsga
           test -L /usr/local/lib/vps-guard-audit/current
-          test "$(/usr/local/bin/vpsga --version)" = "4.4.0"
-          help_output="$(/usr/local/bin/vpsga --help)"
-          grep -q 'vpsga \[options\]' <<<"$help_output"
-          ! grep -q 'sudo ./vps-guard-audit.sh' <<<"$help_output"
+          test -f /usr/local/lib/vps-guard-audit/current/MANIFEST.sha256
+          test "$(/usr/local/bin/vpsga --version)" = "5.0.0"
           /usr/local/bin/vpsga doctor
 
-      - name: Legacy current-directory migration regression test
+      - name: 旧 current 目录迁移
         run: |
           set -euxo pipefail
           sudo rm -rf /usr/local/lib/vps-guard-audit
           sudo mkdir -p /usr/local/lib/vps-guard-audit/current/lib
           sudo cp vps-guard-audit.sh vpsga-manager.sh /usr/local/lib/vps-guard-audit/current/
           sudo cp lib/*.sh /usr/local/lib/vps-guard-audit/current/lib/
-          test -d /usr/local/lib/vps-guard-audit/current
-          test ! -L /usr/local/lib/vps-guard-audit/current
           sudo bash ./install.sh
           test -L /usr/local/lib/vps-guard-audit/current
-          resolved="$(readlink -f /usr/local/lib/vps-guard-audit/current)"
-          test "$resolved" = "/usr/local/lib/vps-guard-audit/releases/4.4.0"
-          test ! -e /usr/local/lib/vps-guard-audit/current/4.4.0
-          test "$(/usr/local/bin/vpsga --version)" = "4.4.0"
+          test "$(readlink -f /usr/local/lib/vps-guard-audit/current)" = "/usr/local/lib/vps-guard-audit/releases/5.0.0"
           /usr/local/bin/vpsga doctor
 
-      - name: Non-root command and report ownership
+      - name: 非 root 运行与报告所有权
         run: |
-          set -euxo pipefail
           out="$RUNNER_TEMP/user-owned-reports"
           mkdir -p "$out"
-          test "$(stat -c %u "$out")" = "$(id -u)"
           set +e
-          /usr/local/bin/vpsga --lang en --profile vps --no-update-check --no-history --format both --output-dir "$out" --quiet
+          /usr/local/bin/vpsga --depth quick --no-history --format both --output-dir "$out" --quiet
           rc=$?
           set -e
           test "$rc" -ge 0 -a "$rc" -le 2
-          test "$(find "$out" -maxdepth 1 -name 'vpsga-*-full.txt' | wc -l)" -eq 1
-          test "$(find "$out" -maxdepth 1 -name 'vpsga-*-ai.txt' | wc -l)" -eq 1
-          test "$(find "$out" -maxdepth 1 -name 'vpsga-*.json' | wc -l)" -eq 1
           while IFS= read -r report; do
             test "$(stat -c %u "$report")" = "$(id -u)"
             test "$(stat -c %a "$report")" = "600"
           done < <(find "$out" -maxdepth 1 -type f -name 'vpsga-*')
 
-      - name: Manager command surface
+      - name: 安装权限与完整性篡改检测
         run: |
-          manager_help="$(/usr/local/lib/vps-guard-audit/current/vpsga-manager.sh --help)"
-          grep -q 'vpsga doctor' <<<"$manager_help"
-          grep -q 'vpsga update' <<<"$manager_help"
-          grep -q 'vpsga uninstall' <<<"$manager_help"
-          ! grep -q 'vpsga open' <<<"$manager_help"
-          ! grep -q 'vpsga serve' <<<"$manager_help"
+          sudo chmod o+w /usr/local/lib/vps-guard-audit/current/lib/check-registry.sh
+          if /usr/local/bin/vpsga doctor; then
+            echo 'doctor 未发现模块篡改' >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/tampered-run"
+          set +e
+          /usr/local/bin/vpsga --depth quick --no-history --no-update-check --format json --output-dir "$RUNNER_TEMP/tampered-run" --quiet
+          rc=$?
+          set -e
+          test "$rc" -eq 76

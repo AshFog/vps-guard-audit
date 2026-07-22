@@ -1,5 +1,21 @@
 # Changelog
 
+## 5.0.0 — 2026-07-22
+
+### 中文原生审计框架
+
+- 项目正式定位为面向中文用户的 Ubuntu / Debian VPS 只读安全审计工具。
+- 删除语言选择和英文报告；安装、检测、帮助、管理命令、报告、AI 提示词、README 与配置注释全部改为中文。
+- 终端状态改为 `[正常]`、`[提醒]`、`[问题]`、`[信息]`、`[跳过]`。
+- 引入 `SYS-1001`、`NET-2001`、`FW-3001`、`SSH-4001` 等稳定检查编号和检查注册表。
+- 增加检查分类、适用系统、所需命令、前置条件、风险、可信度、来源和检测深度元数据。
+- 增加 `quick`、`standard`、`deep` 三种检测深度，以及通用、网站、Docker、代理、家庭和桌面配置档案。
+- JSON 升级为 Schema 2.0，加入 `test_id`、`instance_key`、`status`、`confidence`、`applicability`、`evidence` 和 `references`。
+- 历史比较改用稳定检查编号与实例键，避免标题变化或重复实例破坏比较。
+- 增加运行锁、安全 `umask`、报告路径原子创建、安装目录权限检查和 `MANIFEST.sha256` 完整性校验。
+- `vpsga doctor` 现在检查模块清单和哈希完整性。
+- v4.4.0 保留为最后一个双语稳定版本，既有 Tag 不作修改。
+
 ## 4.4.0 — 2026-07-22
 
 Report bundle, stronger AI redaction, history comparison, safer installation, and management-command release.

@@ -59,24 +59,13 @@ build_redaction_map() {
 generate_ai_report() {
   build_redaction_map
   {
-    if [[ "$LANGUAGE" == zh ]]; then
-      cat <<'EOF_AI_HEADER_ZH'
+    cat <<'EOF_AI_HEADER_ZH'
 VPS Guard Audit — AI 脱敏报告
 
 这份文件由完整报告自动生成，适合提交给可信的 AI 助手继续分析。
 自动脱敏无法保证覆盖所有自定义名称和凭据，分享前仍需亲自检查。
 ------------------------------------------------------------------------------
 EOF_AI_HEADER_ZH
-    else
-      cat <<'EOF_AI_HEADER_EN'
-VPS Guard Audit — AI-Safe Report
-
-This file was generated from the full report for submission to a trusted AI assistant.
-Automatic redaction cannot guarantee removal of every custom identifier or credential.
-Review the file yourself before sharing it.
-------------------------------------------------------------------------------
-EOF_AI_HEADER_EN
-    fi
 
     awk -F '\t' '
       function replace_literal(text, old, new, p) {
@@ -100,12 +89,12 @@ EOF_AI_HEADER_EN
         for (i = 1; i <= pair_count; i++) line = replace_literal(line, original[i], replacement[i])
         line = redact_ipv4(line)
         gsub(/[[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]][[:alpha:]]+/, "EMAIL-REDACTED", line)
-        gsub(/([[:xdigit:]][[:xdigit:]]:){5}[[:xdigit:]][[:xdigit:]]/, "MAC-REDACTED", line)
+        gsub(/[[:xdigit:]][[:xdigit:]]:[[:xdigit:]][[:xdigit:]]:[[:xdigit:]][[:xdigit:]]:[[:xdigit:]][[:xdigit:]]:[[:xdigit:]][[:xdigit:]]:[[:xdigit:]][[:xdigit:]]/, "MAC-REDACTED", line)
         gsub(/SHA256:[[:alnum:]+\/=]+/, "SHA256:REDACTED", line)
         print line
       }
     ' "$REDACTION_MAP" "$FULL_REPORT"
-  } >"$AI_REPORT"
+  } >&5
   chmod 0600 "$AI_REPORT" 2>/dev/null || true
 }
 
@@ -127,6 +116,12 @@ prepare_history_comparison() {
     return 0
   fi
   HISTORY_PREVIOUS="$HISTORY_DIR/$previous"
+  if ! awk -F '\t' 'NF && $1 ~ /^[A-Z]+-[0-9][0-9][0-9][0-9]\|/ {found=1; exit} END {exit !found}' "$HISTORY_PREVIOUS"; then
+    # v4 使用可变旧 ID。v5 首次运行时建立新基线，避免把框架升级误报为大量变化。
+    HISTORY_FIRST_RUN=1
+    HISTORY_PREVIOUS=""
+    return 0
+  fi
 
   while IFS=$'\t' read -r id level title; do
     [[ -n "$id" ]] || continue
@@ -135,7 +130,7 @@ prepare_history_comparison() {
   done <"$HISTORY_PREVIOUS"
 
   for idx in "${!FINDING_IDS[@]}"; do
-    id="${FINDING_IDS[$idx]}"
+    id="${FINDING_HISTORY_KEYS[$idx]}"
     level="${FINDING_LEVELS[$idx]}"
     title="${FINDING_TITLES[$idx]}"
     cur_level["$id"]="$level"
@@ -148,7 +143,7 @@ prepare_history_comparison() {
     if [[ -z "${prev_level[$id]+x}" || ( "${prev_level[$id]}" != WARN && "${prev_level[$id]}" != FAIL ) ]]; then
       HISTORY_ADDED+=("${cur_title[$id]}")
     elif [[ "${prev_level[$id]}" != "$current_level" ]]; then
-      HISTORY_CHANGED+=("${cur_title[$id]} (${prev_level[$id]} -> $current_level)")
+      HISTORY_CHANGED+=("${cur_title[$id]} ($(level_label "${prev_level[$id]}") -> $(level_label "$current_level"))")
     fi
   done
 
@@ -163,8 +158,7 @@ prepare_history_comparison() {
 print_history_comparison() {
   [[ "$HISTORY_ENABLED" -eq 1 ]] || return 0
   echo
-  if [[ "$LANGUAGE" == zh ]]; then
-    echo "与上一次检测相比"
+  echo "与上一次检测相比"
     echo "------------------------------------------------------------------------------"
     if ((HISTORY_FIRST_RUN)); then
       echo "这是第一次保存历史结果。下一次运行时会显示新增问题和已经解决的问题。"
@@ -176,20 +170,6 @@ print_history_comparison() {
     ((${#HISTORY_ADDED[@]})) && { echo "  新增："; printf '    - %s\n' "${HISTORY_ADDED[@]}"; }
     ((${#HISTORY_RESOLVED[@]})) && { echo "  已解决："; printf '    - %s\n' "${HISTORY_RESOLVED[@]}"; }
     ((${#HISTORY_CHANGED[@]})) && { echo "  变化："; printf '    - %s\n' "${HISTORY_CHANGED[@]}"; }
-  else
-    echo "Compared with the previous audit"
-    echo "------------------------------------------------------------------------------"
-    if ((HISTORY_FIRST_RUN)); then
-      echo "This is the first saved baseline. The next run will show new and resolved findings."
-      return 0
-    fi
-    echo "  New findings: ${#HISTORY_ADDED[@]}"
-    echo "  Resolved findings: ${#HISTORY_RESOLVED[@]}"
-    echo "  Severity changes: ${#HISTORY_CHANGED[@]}"
-    ((${#HISTORY_ADDED[@]})) && { echo "  New:"; printf '    - %s\n' "${HISTORY_ADDED[@]}"; }
-    ((${#HISTORY_RESOLVED[@]})) && { echo "  Resolved:"; printf '    - %s\n' "${HISTORY_RESOLVED[@]}"; }
-    ((${#HISTORY_CHANGED[@]})) && { echo "  Changed:"; printf '    - %s\n' "${HISTORY_CHANGED[@]}"; }
-  fi
 }
 
 finalize_report_ownership() {
@@ -217,7 +197,7 @@ save_history_state() {
       for idx in "${!FINDING_IDS[@]}"; do
         title="${FINDING_TITLES[$idx]//$'\t'/ }"
         title="${title//$'\n'/ }"
-        printf '%s\t%s\t%s\n' "${FINDING_IDS[$idx]}" "${FINDING_LEVELS[$idx]}" "$title" >>"$state_tmp"
+        printf '%s\t%s\t%s\n' "${FINDING_HISTORY_KEYS[$idx]}" "${FINDING_LEVELS[$idx]}" "$title" >>"$state_tmp"
       done
       state_file="$HISTORY_DIR/vpsga-${STAMP}.state"
       install -m 0600 "$state_tmp" "$state_file" 2>/dev/null || true

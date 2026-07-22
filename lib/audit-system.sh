@@ -14,11 +14,11 @@ audit_system() {
       record WARN systemd.failed "发现失败的 systemd 单元" "Failed systemd units detected" "$failed_count"
       printf '%s\n' "$FAILED_UNITS" | trim_lines
     fi
-    echo "--- enabled services (first $MAX_LIST_ITEMS) ---"
+    echo "--- 已启用服务（前 $MAX_LIST_ITEMS 项）---"
     systemctl list-unit-files --type=service --state=enabled --no-pager --no-legend 2>/dev/null | trim_lines || true
-    echo "--- root crontab ---"; crontab -l 2>/dev/null | trim_lines || echo "none"
-    echo "--- system cron (first $MAX_LIST_ITEMS) ---"; grep -RHsEv '^[[:space:]]*(#|$)' /etc/crontab /etc/cron.d 2>/dev/null | trim_lines || true
-    echo "--- timers (first $MAX_LIST_ITEMS) ---"; systemctl list-timers --all --no-pager --no-legend 2>/dev/null | trim_lines || true
+    echo "--- root 的 crontab ---"; crontab -l 2>/dev/null | trim_lines || echo "无"
+    echo "--- 系统 Cron（前 $MAX_LIST_ITEMS 项）---"; grep -RHsEv '^[[:space:]]*(#|$)' /etc/crontab /etc/cron.d 2>/dev/null | trim_lines || true
+    echo "--- systemd 定时器（前 $MAX_LIST_ITEMS 项）---"; systemctl list-timers --all --no-pager --no-legend 2>/dev/null | trim_lines || true
     BAD_CRON="$(find /etc/cron.d /etc/cron.daily /etc/cron.hourly /etc/cron.weekly /etc/cron.monthly -xdev -type f -perm -0002 -print 2>/dev/null || true)"
     [[ -z "$BAD_CRON" ]] \
       && record PASS cron.mode "未发现全局可写的 Cron 文件" "No world-writable cron files" \
@@ -41,8 +41,8 @@ audit_system() {
         if [[ "$newest_index" =~ ^[0-9]+$ ]]; then
           age_days=$(( ($(date +%s) - newest_index) / 86400 ))
           ((age_days <= 7)) \
-            && record PASS pkg.index.age "APT 软件包索引较新" "APT package indexes are recent" "$age_days day(s)" \
-            || record WARN pkg.index.age "APT 软件包索引可能过旧" "APT package indexes may be stale" "$age_days day(s)" \
+            && record PASS pkg.index.age "APT 软件包索引较新" "APT package indexes are recent" "$age_days 天" \
+            || record WARN pkg.index.age "APT 软件包索引可能过旧" "APT package indexes may be stale" "$age_days 天" \
               "需要最新结果时，使用 --refresh-package-index。" "Use --refresh-package-index when fresh results are required."
         else
           record SKIP pkg.index.age "无法确定 APT 索引更新时间" "Unable to determine APT index age"
@@ -55,9 +55,9 @@ audit_system() {
       if [[ "$update_count" -eq 0 ]]; then
         record PASS pkg.updates "没有待更新的软件包" "No package updates are pending"
       else
-        record WARN pkg.updates "存在待更新的软件包" "Package updates are pending" "$update_count total; $security_count security; $kernel_count kernel-related"
+        record WARN pkg.updates "存在待更新的软件包" "Package updates are pending" "共 $update_count 个；安全更新 $security_count 个；内核相关 $kernel_count 个"
         printf '%s\n' "$UPDATES" | trim_lines
-        ((update_count > MAX_LIST_ITEMS)) && echo "... $((update_count-MAX_LIST_ITEMS)) more"
+        ((update_count > MAX_LIST_ITEMS)) && echo "……另有 $((update_count-MAX_LIST_ITEMS)) 项未显示"
       fi
       HELD="$(apt-mark showhold 2>/dev/null || true)"
       [[ -z "$HELD" ]] \
@@ -88,6 +88,7 @@ audit_system() {
       record SKIP pkg.updates "系统没有可用的 apt 命令" "apt is unavailable; package update check skipped"
     fi
 
+    if [[ "$DEPTH" != quick ]]; then
     section "$(t sysctl)"
     check_sysctl() {
       local key="$1" expected="$2" val
@@ -118,7 +119,12 @@ audit_system() {
     check_sysctl net.ipv4.conf.all.log_martians 1
     check_sysctl net.ipv6.conf.all.accept_redirects 0
     check_sysctl net.ipv6.conf.default.accept_redirects 0
+    else
+      section "$(t sysctl)"
+      record SKIP sysctl.depth "快速检查跳过内核参数基线" "Kernel baseline skipped in quick mode"
+    fi
 
+    if [[ "$DEPTH" == deep ]]; then
     section "$(t files)"
     for item in "/etc/passwd:644" "/etc/group:644" "/etc/shadow:600,640" "/etc/gshadow:600,640" "/etc/ssh/sshd_config:600,644"; do
       path="${item%%:*}"; expected="${item#*:}"
@@ -135,15 +141,19 @@ audit_system() {
         && record PASS "world.$d" "$d 中没有全局可写文件" "No world-writable files in $d" \
         || record FAIL "world.$d" "$d 中存在全局可写文件" "World-writable files in $d" "$bad"
     done
-    echo "--- SUID/SGID host inventory ---"
+    echo "--- 主机 SUID/SGID 清单 ---"
     SUID_LIST="$(find / -xdev \
       \( -path /proc -o -path /sys -o -path /dev -o -path /run -o -path /mnt -o -path /var/lib/docker -o -path /var/lib/containerd -o -path /var/lib/snapd \) -prune -o \
       -type f -perm /111 \( -perm -4000 -o \( -perm -2000 -user root \) \) -printf '%m %u:%g %p\n' 2>/dev/null | sort || true)"
     suid_count="$(sed '/^$/d' <<<"$SUID_LIST" | wc -l | tr -d ' ')"
-    echo "Host SUID/SGID count: $suid_count"
+    echo "主机 SUID/SGID 数量：$suid_count"
     printf '%s\n' "$SUID_LIST" | trim_lines
     SUID_UNUSUAL="$(awk '$2 ~ /^root:/ && $3 ~ /^\/(tmp|var\/tmp|dev\/shm|home|opt|usr\/local)\// {print}' <<<"$SUID_LIST" || true)"
     [[ -z "$SUID_UNUSUAL" ]] \
       && record PASS suid.unusual "未发现位于高风险路径的 SUID/SGID 文件" "No SUID/SGID files found in high-risk paths" \
       || { record WARN suid.unusual "高风险路径中存在 SUID/SGID 文件" "SUID/SGID files detected in high-risk paths" "$(wc -l <<<"$SUID_UNUSUAL" | tr -d ' ')"; echo "$SUID_UNUSUAL"; }
+    else
+      section "$(t files)"
+      record SKIP perm.depth "仅深度检查扫描敏感文件权限和 SUID/SGID" "Sensitive permissions and SUID/SGID inventory require deep mode"
+    fi
 }
