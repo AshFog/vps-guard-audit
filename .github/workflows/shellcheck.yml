@@ -8,6 +8,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Bash syntax
-        run: bash -n vps-guard-audit.sh
+        run: bash -n vps-guard-audit.sh bootstrap.sh install.sh
       - name: ShellCheck
-        run: shellcheck vps-guard-audit.sh install.sh
+        run: shellcheck vps-guard-audit.sh bootstrap.sh install.sh
