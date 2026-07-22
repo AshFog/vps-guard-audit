@@ -23,7 +23,7 @@ The audit auto-detects `vps`, `server`, `desktop` and `container` profiles. Othe
 curl -fsSL https://raw.githubusercontent.com/AshFog/vps-guard-audit/main/bootstrap.sh | bash
 ```
 
-The bootstrap downloads the audit to a temporary file, reads the language menu from `/dev/tty`, runs with root privileges, and removes the temporary file afterward. The launcher downloads its versioned audit modules automatically when they are not available locally.
+The bootstrap downloads the complete project to a temporary directory, reads the bilingual language menu from `/dev/tty`, runs with root privileges, saves TXT and JSON reports in the directory where the command was launched, and then removes only its temporary program files.
 
 For higher assurance, pin a release tag or commit SHA instead of the moving `main` branch.
 
@@ -56,7 +56,7 @@ The normal audit does not:
 
 By default it reads the existing APT cache and does **not** run `apt-get update`. The optional `--refresh-package-index` flag refreshes APT metadata and therefore writes under `/var/lib/apt/lists`.
 
-`--rootkit-check` only launches `rkhunter` or `chkrootkit` when already installed.
+Rootkit scanning is optional. Tools such as `rkhunter` and `chkrootkit` can be slow, produce false positives, and cannot prove that a host is clean. The default audit never installs or launches them automatically. `--rootkit-check` runs whichever of those scanners are already installed.
 
 ## Major checks
 
