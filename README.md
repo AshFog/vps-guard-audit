@@ -1,8 +1,8 @@
 # VPS Guard Audit
 
-面向 VPS 新手、服务器管理员和 Debian/Ubuntu 主机用户的双语安全审计工具。它默认只读，不会自动修改 SSH、防火墙、用户、服务或系统配置。除了完整技术检查，报告还会用更自然的语言说明发现了什么、为什么值得关注、下一步可以怎么确认，并附带一个可直接提交给可信 AI 助手的分析模板。
+Debian/Ubuntu 主机用户的双语安全审计工具。它默认只读，不会自动修改 SSH、防火墙、用户、服务或系统配置。除了完整技术检查，报告还会用更自然的语言说明发现了什么、为什么值得关注、下一步可以怎么确认，并附带一个可直接提交给可信 AI 助手的分析模板。
 
-A bilingual security audit for VPS beginners and Debian/Ubuntu hosts. It is read-only by default and does not automatically modify SSH, firewalls, users, services, or system configuration. In addition to technical evidence, the TXT report explains findings in plain language, suggests safe next steps, and includes a ready-to-use prompt for a trusted AI assistant.
+Debian/Ubuntu hosts. It is read-only by default and does not automatically modify SSH, firewalls, users, services, or system configuration. In addition to technical evidence, the TXT report explains findings in plain language, suggests safe next steps, and includes a ready-to-use prompt for a trusted AI assistant.
 
 ## Supported systems
 
