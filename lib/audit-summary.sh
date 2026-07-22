@@ -57,7 +57,6 @@ print_bucket_findings() {
   done
   if [[ "$bucket" == improve ]]; then
     if print_sysctl_group "$number"; then
-      number=$((number+1))
       printed=1
     fi
   fi
@@ -71,8 +70,9 @@ print_ai_handoff() {
     cat <<'EOF_AI_ZH'
 使用 AI 获取更详细的修复方案
 
-这份 TXT 文件是本次检查的完整报告。你可以把它提交给可信的 AI 助手，
-让 AI 结合系统版本、服务器用途和检测结果，逐项解释问题并制定修复计划。
+请优先提交本次生成的 *-ai.txt 脱敏报告，而不是完整报告。
+AI 脱敏报告会替换部分主机名、用户名、容器名称、域名、IP、邮箱、MAC 地址和密钥指纹，
+但自动脱敏无法保证覆盖所有自定义信息，提交前仍需亲自检查。
 
 建议同时告诉 AI：
   - 服务器主要运行什么服务；
@@ -83,7 +83,7 @@ print_ai_handoff() {
 
 可以直接使用下面的提问方式：
 
-请分析这份 VPS Guard Audit 完整报告。
+请分析这份 VPS Guard Audit 报告。
 1. 先用简单语言总结目前的安全状况。
 2. 区分需要尽快处理、建议改进、需要本人确认和可选加固。
 3. 不要把所有监听端口都当成恶意服务。
@@ -94,18 +94,16 @@ print_ai_handoff() {
 8. 不要建议清空 iptables/nftables、重置 UFW，或直接关闭当前 SSH 端口。
 9. 一次只处理一个可能导致断连的项目。
 
-隐私提醒：
-报告默认会隐藏部分标识信息，但提交前仍应亲自检查。
-可以删除不希望公开的公网 IP、域名、用户名、容器名称、主机名和密钥指纹。
 不要提交密码、SSH 私钥、API Key、访问令牌、Cookie 或其他凭据。
 EOF_AI_ZH
   else
     cat <<'EOF_AI_EN'
 Using AI for a more detailed remediation plan
 
-This TXT file is the complete report from the audit. You can submit it to a trusted AI
-assistant and ask it to explain each finding and prepare a remediation plan based on the
-operating-system release, intended host role, and detected services.
+Prefer the generated *-ai.txt redacted report instead of the full report.
+The AI-safe copy replaces some hostnames, usernames, container names, domains, IP addresses,
+email addresses, MAC addresses, and key fingerprints. Automatic redaction cannot cover every
+custom identifier, so review it yourself before sharing.
 
 Also tell the AI:
   - what the server is intended to run;
@@ -116,7 +114,7 @@ Also tell the AI:
 
 Suggested prompt:
 
-Please analyze this complete VPS Guard Audit report.
+Please analyze this VPS Guard Audit report.
 1. Begin with a plain-language summary of the current security posture.
 2. Separate prompt attention, suggested improvements, owner confirmation, and optional hardening.
 3. Do not assume that every listening port is malicious.
@@ -127,16 +125,14 @@ Please analyze this complete VPS Guard Audit report.
 8. Do not recommend flushing iptables/nftables, resetting UFW, or directly closing the active SSH port.
 9. Handle only one potentially disconnecting change at a time.
 
-Privacy reminder:
-The report redacts some identifiers by default, but review it before sharing.
-Remove public IP addresses, domains, usernames, container names, hostnames, or fingerprints you do not
-want to disclose. Never share passwords, SSH private keys, API keys, access tokens, cookies, or credentials.
+Never share passwords, SSH private keys, API keys, access tokens, cookies, or credentials.
 EOF_AI_EN
   fi
 }
 
 audit_summary() {
   local idx number
+  prepare_history_comparison
   section "$(t summary)"
   TOTAL=$((PASS+WARN+FAIL+INFO+SKIP))
 
@@ -175,6 +171,8 @@ audit_summary() {
     echo "  Not checked this time: $SKIP"
     echo "  Total checks: $TOTAL"
   fi
+
+  print_history_comparison
 
   if ((FAIL > 0)); then
     echo
