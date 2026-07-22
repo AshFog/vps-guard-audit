@@ -7,41 +7,53 @@ audit_containers() {
       if docker info >/dev/null 2>&1; then
         record INFO docker.active "Docker 守护进程正在运行" "Docker daemon is active"
         DOCKER_PS="$(docker ps --format '{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.Status}}' 2>/dev/null || true)"
-        echo -e "ID\tNAME\tIMAGE\tPORTS\tSTATUS"
+        printf 'ID\tNAME\tIMAGE\tPORTS\tSTATUS\n'
         printf '%s\n' "$DOCKER_PS" | trim_lines
-        ids="$(docker ps -q 2>/dev/null || true)"
-        if [[ -n "$ids" ]]; then
+        mapfile -t docker_ids < <(docker ps -q 2>/dev/null | sed '/^$/d')
+        if ((${#docker_ids[@]})); then
           PUBLISHED=""
-          while IFS= read -r id; do
-            [[ -z "$id" ]] && continue
+          port_query_count=0
+          for id in "${docker_ids[@]}"; do
             cname="$(docker inspect -f '{{.Name}}' "$id" 2>/dev/null | sed 's#^/##')"
             ports="$(docker port "$id" 2>/dev/null || true)"
+            port_query_count=$((port_query_count+1))
             while IFS= read -r mapping; do
               [[ -z "$mapping" ]] && continue
-              if grep -Eq '-> (0\.0\.0\.0:|\[::\]:)' <<<"$mapping"; then PUBLISHED+="$cname $mapping"$'\n'; fi
+              if grep -Eq -- '-> (0\.0\.0\.0:|\[::\]:)' <<<"$mapping"; then
+                PUBLISHED+="${cname:-unknown-container} $mapping"$'\n'
+              fi
             done <<<"$ports"
-          done <<<"$ids"
+          done
           if [[ -n "$PUBLISHED" ]]; then
             record WARN docker.published "Docker 容器端口发布到全部接口" "Docker container ports are published on all interfaces" "$(sed '/^$/d' <<<"$PUBLISHED" | wc -l | tr -d ' ') mapping(s)" \
               "UFW INPUT 规则不能单独证明这些端口已被阻止；请检查 Docker 转发链、云防火墙和绑定地址。" \
               "UFW INPUT rules alone do not prove these ports are blocked; inspect Docker forwarding chains, provider firewall and bind addresses."
             printf '%s' "$PUBLISHED" | trim_lines
-          else
+          elif ((port_query_count > 0)); then
             record PASS docker.published "未发现发布到全部接口的 Docker 容器端口" "No Docker container ports are published on all interfaces"
+          else
+            record SKIP docker.published "无法读取 Docker 端口映射" "Docker port mappings could not be read"
           fi
 
-          INSPECT="$(docker inspect $ids --format '{{.Name}} privileged={{.HostConfig.Privileged}} network={{.HostConfig.NetworkMode}} pid={{.HostConfig.PidMode}} ipc={{.HostConfig.IpcMode}} user={{.Config.User}} readonly={{.HostConfig.ReadonlyRootfs}} security={{json .HostConfig.SecurityOpt}} caps={{json .HostConfig.CapAdd}} mounts={{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}' 2>/dev/null || true)"
-          PRIV="$(grep -E 'privileged=true' <<<"$INSPECT" || true)"
-          [[ -z "$PRIV" ]] && record PASS docker.priv "未发现特权 Docker 容器" "No running privileged Docker containers" || { record WARN docker.priv "发现特权 Docker 容器" "Privileged Docker containers detected" "$(wc -l <<<"$PRIV" | tr -d ' ')"; echo "$PRIV"; }
-          HOSTMODES="$(grep -E 'network=host|pid=host|ipc=host' <<<"$INSPECT" || true)"
-          [[ -z "$HOSTMODES" ]] || { record WARN docker.host_modes "容器使用宿主机 network/PID/IPC 命名空间" "Containers use host network/PID/IPC namespaces"; echo "$HOSTMODES"; }
-          WEAKSEC="$(grep -Ei 'apparmor=unconfined|seccomp=unconfined|SYS_ADMIN|NET_ADMIN|"ALL"' <<<"$INSPECT" || true)"
-          [[ -z "$WEAKSEC" ]] || { record WARN docker.weak_isolation "容器存在弱化隔离设置或高风险 capability" "Containers weaken isolation or add high-risk capabilities"; echo "$WEAKSEC"; }
-          SENSITIVE_MOUNTS="$(grep -E '(/var/run/docker\.sock| /:|:/etc |:/root |:/proc |:/sys )' <<<"$INSPECT" || true)"
-          [[ -z "$SENSITIVE_MOUNTS" ]] || { record WARN docker.mounts "容器挂载了敏感宿主资源" "Containers mount sensitive host resources"; echo "$SENSITIVE_MOUNTS"; }
+          INSPECT="$(docker inspect "${docker_ids[@]}" --format '{{.Name}} privileged={{.HostConfig.Privileged}} network={{.HostConfig.NetworkMode}} pid={{.HostConfig.PidMode}} ipc={{.HostConfig.IpcMode}} user={{.Config.User}} readonly={{.HostConfig.ReadonlyRootfs}} security={{json .HostConfig.SecurityOpt}} caps={{json .HostConfig.CapAdd}} mounts={{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}' 2>/dev/null || true)"
+          if [[ -z "$INSPECT" ]]; then
+            record SKIP docker.inspect "无法读取运行中容器的安全配置" "Running-container security configuration could not be read"
+          else
+            PRIV="$(grep -E 'privileged=true' <<<"$INSPECT" || true)"
+            [[ -z "$PRIV" ]] \
+              && record PASS docker.priv "未发现特权 Docker 容器" "No running privileged Docker containers" \
+              || { record WARN docker.priv "发现特权 Docker 容器" "Privileged Docker containers detected" "$(wc -l <<<"$PRIV" | tr -d ' ')"; echo "$PRIV"; }
+            HOSTMODES="$(grep -E 'network=host|pid=host|ipc=host' <<<"$INSPECT" || true)"
+            [[ -z "$HOSTMODES" ]] || { record WARN docker.host_modes "容器使用宿主机 network/PID/IPC 命名空间" "Containers use host network/PID/IPC namespaces"; echo "$HOSTMODES"; }
+            WEAKSEC="$(grep -Ei 'apparmor=unconfined|seccomp=unconfined|SYS_ADMIN|NET_ADMIN|"ALL"' <<<"$INSPECT" || true)"
+            [[ -z "$WEAKSEC" ]] || { record WARN docker.weak_isolation "容器存在弱化隔离设置或高风险 capability" "Containers weaken isolation or add high-risk capabilities"; echo "$WEAKSEC"; }
+            SENSITIVE_MOUNTS="$(grep -E '(/var/run/docker\.sock| /:|:/etc |:/root |:/proc |:/sys )' <<<"$INSPECT" || true)"
+            [[ -z "$SENSITIVE_MOUNTS" ]] || { record WARN docker.mounts "容器挂载了敏感宿主资源" "Containers mount sensitive host resources"; echo "$SENSITIVE_MOUNTS"; }
+          fi
         else
           record INFO docker.none "没有运行中的 Docker 容器" "No running Docker containers"
         fi
+
         if have iptables && iptables -S DOCKER-USER >/dev/null 2>&1; then
           rules="$(iptables -S DOCKER-USER 2>/dev/null || true)"
           echo "$rules"
@@ -59,6 +71,7 @@ audit_containers() {
     else
       record SKIP docker.absent "未安装 Docker" "Docker is not installed"
     fi
+
     section "$(t malware)"
     echo "--- deleted executables still running ---"
     if have lsof; then
@@ -69,16 +82,19 @@ audit_containers() {
     else
       record SKIP malware.deleted "未安装 lsof，跳过已删除可执行文件检查" "lsof is unavailable; deleted-executable check skipped"
     fi
+
     echo "--- executable files recently modified in temporary directories ---"
     TMP_EXEC="$(find /tmp /var/tmp /dev/shm -xdev -type f -mtime -7 -perm /111 ! -path "$SELF_PATH" ! -path "$TMP_DIR/*" -ls 2>/dev/null | head -n 100 || true)"
     [[ -z "$TMP_EXEC" ]] \
       && record PASS malware.tmp "临时目录中未发现除审计脚本外的近期可执行文件" "No recent temporary executables were found other than the audit script" \
       || { record WARN malware.tmp "临时目录中存在近期可执行文件" "Recent executable files found in temporary directories"; echo "$TMP_EXEC"; }
+
     echo "--- suspicious process names ---"
     SUS_PROC="$(ps auxww 2>/dev/null | grep -Ei 'xmrig|minerd|kinsing|kdevtmpfsi|cryptominer|watchbog|masscan|zmap' | grep -vE 'grep|vps-guard-audit' || true)"
     [[ -z "$SUS_PROC" ]] \
       && record PASS malware.process "未发现常见挖矿或扫描器进程名称" "No common miner or scanner process names detected" \
       || record FAIL malware.process "发现常见恶意进程特征" "Common malicious process signature detected" "$SUS_PROC"
+
     section "$(t proxy)"
     PATTERN='sing-box|xray|v2ray|hysteria|tuic|naive|anytls|3x-ui|x-ui|hiddify|mihomo|clash|v2ray-agent|wireguard'
     systemctl list-unit-files --type=service 2>/dev/null | grep -Ei "$PATTERN" || true
@@ -89,6 +105,7 @@ audit_containers() {
         && record PASS "proxy.$risky" "未发现 $risky" "$risky not found" \
         || record WARN "proxy.$risky" "发现高风险辅助脚本 $risky" "Risky helper script found: $risky" "$found"
     done
+
     section "$(t rootkit)"
     if [[ "$CHECK_ROOTKITS" -eq 1 ]]; then
       if have rkhunter; then
