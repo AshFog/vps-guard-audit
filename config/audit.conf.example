@@ -1,12 +1,22 @@
 # Optional VPS Guard Audit configuration
-# Leave values empty unless you want to customize the audit.
+# Leave values empty or keep defaults unless you need customization.
 
-# Successful-login IPs you recognize.
+# Successful-login IPs you recognize. Raw values are used for matching even
+# when the displayed report is redacted.
 TRUSTED_LOGIN_IPS=""
 
-# Extra public ports intentionally exposed by your VPS.
+# Extra all-interface ports intentionally exposed by this host.
 CUSTOM_ALLOWED_TCP_PORTS=""
 CUSTOM_ALLOWED_UDP_PORTS=""
 
 # Normally only root should have UID 0.
 EXPECTED_UID0_USERS="root"
+
+# auto, vps, server, desktop, container
+PROFILE="auto"
+
+# baseline or strict
+POLICY="baseline"
+
+# Maximum rows printed for long inventories.
+MAX_LIST_ITEMS=20
