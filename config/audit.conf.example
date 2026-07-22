@@ -1,0 +1,12 @@
+# Optional VPS Guard Audit configuration
+# Leave values empty unless you want to customize the audit.
+
+# Successful-login IPs you recognize.
+TRUSTED_LOGIN_IPS=""
+
+# Extra public ports intentionally exposed by your VPS.
+CUSTOM_ALLOWED_TCP_PORTS=""
+CUSTOM_ALLOWED_UDP_PORTS=""
+
+# Normally only root should have UID 0.
+EXPECTED_UID0_USERS="root"
