@@ -14,6 +14,8 @@ Compatibility and accuracy release based on Debian 13 and Ubuntu 24.04 field tes
 - Missing optional commands now produce `SKIP` instead of false `PASS` results.
 - Rootkit scanners now distinguish missing tools, execution warnings and successful completion.
 - Fail2ban inactivity no longer produces a second jail warning and a duplicate failed-unit warning.
+- One-command reports are now saved in the directory where the command was launched instead of the bootstrap temporary directory.
+- Clarifies why optional rootkit scanners are not launched or installed automatically.
 
 ### Changed
 
