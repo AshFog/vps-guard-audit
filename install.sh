@@ -4,16 +4,80 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 SRC="$ROOT/vps-guard-audit.sh"
 LIB_SRC="$ROOT/lib"
-DEST="/usr/local/sbin/vps-guard-audit"
-LIB_DEST="/usr/local/lib/vps-guard-audit"
+INSTALL_ROOT="/usr/local/lib/vps-guard-audit"
+RELEASES_DIR="$INSTALL_ROOT/releases"
+CURRENT_LINK="$INSTALL_ROOT/current"
+VPSGA_BIN="/usr/local/bin/vpsga"
+COMPAT_BIN="/usr/local/sbin/vps-guard-audit"
+STAGE=""
+WRAPPER_TMP=""
 
+cleanup() {
+  [[ -n "$STAGE" && -d "$STAGE" ]] && rm -rf "$STAGE"
+  [[ -n "$WRAPPER_TMP" && -f "$WRAPPER_TMP" ]] && rm -f "$WRAPPER_TMP"
+}
+trap cleanup EXIT
+
+[[ ${EUID:-$(id -u)} -eq 0 ]] || {
+  echo "Run the installer as root: sudo ./install.sh" >&2
+  exit 77
+}
 [[ -f "$SRC" ]] || { echo "Missing: $SRC" >&2; exit 66; }
 [[ -d "$LIB_SRC" ]] || { echo "Missing: $LIB_SRC" >&2; exit 66; }
 
-install -d -m 0755 "$LIB_DEST"
-install -m 0644 "$LIB_SRC"/*.sh "$LIB_DEST"/
-install -m 0755 "$SRC" "$DEST"
+VERSION="$(bash "$SRC" --version)"
+[[ "$VERSION" =~ ^[0-9A-Za-z._-]+$ ]] || {
+  echo "Invalid version returned by the audit: $VERSION" >&2
+  exit 66
+}
 
-echo "Installed: $DEST"
-echo "Modules: $LIB_DEST"
-echo "Run: sudo vps-guard-audit"
+install -d -m 0755 "$RELEASES_DIR" /usr/local/bin /usr/local/sbin
+STAGE="$(mktemp -d "$RELEASES_DIR/.install-${VERSION}.XXXXXX")"
+install -m 0755 "$SRC" "$STAGE/vps-guard-audit.sh"
+install -d -m 0755 "$STAGE/lib"
+install -m 0644 "$LIB_SRC"/*.sh "$STAGE/lib/"
+
+RELEASE_DIR="$RELEASES_DIR/$VERSION"
+rm -rf "$RELEASE_DIR"
+mv "$STAGE" "$RELEASE_DIR"
+STAGE=""
+ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
+
+WRAPPER_TMP="$(mktemp)"
+cat >"$WRAPPER_TMP" <<'EOF_WRAPPER'
+#!/usr/bin/env bash
+set -euo pipefail
+
+TARGET="/usr/local/lib/vps-guard-audit/current/vps-guard-audit.sh"
+[[ -x "$TARGET" ]] || {
+  echo "VPS Guard Audit is not installed correctly. Run the official one-command installer again." >&2
+  exit 69
+}
+
+case "${1-}" in
+  -h|--help|-v|--version)
+    exec "$TARGET" "$@"
+    ;;
+esac
+
+if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+  exec "$TARGET" "$@"
+fi
+
+command -v sudo >/dev/null 2>&1 || {
+  echo "Root privileges are required and sudo is not available." >&2
+  exit 77
+}
+exec sudo "$TARGET" "$@"
+EOF_WRAPPER
+
+install -m 0755 "$WRAPPER_TMP" "$VPSGA_BIN"
+install -m 0755 "$WRAPPER_TMP" "$COMPAT_BIN"
+
+# Remove files left by the earlier flat module layout after the new release is ready.
+find "$INSTALL_ROOT" -maxdepth 1 -type f -name '*.sh' -delete 2>/dev/null || true
+
+echo "Installed VPS Guard Audit $VERSION"
+echo "Command: vpsga"
+echo "Location: $RELEASE_DIR"
+echo "Reports will be saved in the directory where vpsga is run."
