@@ -1,5 +1,38 @@
 # Changelog
 
+## 4.3.0 — 2026-07-22
+
+Beginner-report release focused on clarity, safe next steps, and AI-assisted remediation.
+
+### Changed
+
+- Rewrites the final summary in careful, natural Chinese and English instead of presenting only security-engineering terminology.
+- Separates findings into prompt attention, owner confirmation, and suggested improvements.
+- Explains that warnings do not automatically mean the host is compromised.
+- Groups multiple sysctl deviations into one understandable hardening item while keeping the individual values in the report.
+- Keeps the project strictly audit-only: no automatic repair menu and no unattended configuration changes.
+
+### Added
+
+- Plain-language explanations for common SSH, firewall, package, Docker, account, service, port, malware, and kernel findings.
+- Suggested next steps and explicit cautions for operations that may interrupt SSH, networking, containers, or running services.
+- A detailed Chinese and English AI handoff section in every TXT report.
+- A copy-ready prompt asking an AI assistant for issue prioritization, safe commands, backups, verification, and rollback guidance.
+- Privacy guidance warning users not to share passwords, private keys, API keys, tokens, cookies, or other credentials.
+- Structured in-memory finding metadata used to build the beginner summary without changing the JSON finding schema.
+- Chinese and English summary smoke tests in GitHub Actions.
+
+## 4.2.1 — 2026-07-22
+
+Startup reliability fix.
+
+### Fixed
+
+- Reads the language menu directly from `/dev/tty` when launched through `curl | bash`.
+- Removes the extra Enter-to-start prompt that could wait on the pipeline input.
+- Saves one-command reports in the directory where the command was launched.
+- Keeps the startup title as `VPS Guard Audit` without the former Chinese brand suffix.
+
 ## 4.2.0 — 2026-07-22
 
 Compatibility and accuracy release based on Debian 13 and Ubuntu 24.04 field tests.
@@ -14,7 +47,6 @@ Compatibility and accuracy release based on Debian 13 and Ubuntu 24.04 field tes
 - Missing optional commands now produce `SKIP` instead of false `PASS` results.
 - Rootkit scanners now distinguish missing tools, execution warnings and successful completion.
 - Fail2ban inactivity no longer produces a second jail warning and a duplicate failed-unit warning.
-- One-command reports are now saved in the directory where the command was launched instead of the bootstrap temporary directory.
 - Clarifies why optional rootkit scanners are not launched or installed automatically.
 
 ### Changed
