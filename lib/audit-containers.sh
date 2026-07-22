@@ -109,7 +109,9 @@ audit_containers() {
       else
         record SKIP rootkit.chkrootkit "未安装 chkrootkit" "chkrootkit is not installed"
       fi
+    elif have rkhunter || have chkrootkit; then
+      record SKIP rootkit.disabled "为避免耗时和误报，默认不自动运行可选 Rootkit 扫描；使用 --rootkit-check 启动" "Optional rootkit scans are not run automatically because they may be slow and noisy; use --rootkit-check to start them"
     else
-      record SKIP rootkit.disabled "默认不运行 Rootkit 扫描器；可加 --rootkit-check" "Rootkit scanners are disabled by default; use --rootkit-check"
+      record SKIP rootkit.unavailable "未安装 rkhunter 或 chkrootkit；默认审计不会自动安装第三方扫描器" "Neither rkhunter nor chkrootkit is installed; the default audit does not install third-party scanners"
     fi
 }
