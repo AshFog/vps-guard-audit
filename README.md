@@ -54,10 +54,9 @@ Version 4.4 uses short, timestamped names:
 vpsga-20260722-153045-full.txt
 vpsga-20260722-153045-ai.txt
 vpsga-20260722-153045.json
-vpsga-20260722-153045.html
 ```
 
-The four files share the same generation time, making one audit bundle easy to identify.
+The three files share the same generation time, making one audit bundle easy to identify.
 
 ### Full TXT
 
@@ -79,51 +78,7 @@ Automatic redaction cannot guarantee that every custom identifier or credential 
 
 ### JSON
 
-The JSON file contains structured findings for automation and future integrations.
-
-### HTML
-
-The HTML file is a standalone report with:
-
-- summary cards;
-- plain-language findings;
-- warnings and cautions;
-- comparison with the previous audit;
-- links to the matching TXT and JSON files;
-- collapsible full technical output;
-- automatic light and dark appearance.
-
-At the end of an audit, the terminal prints a `file://` address. On a computer with a local graphical browser, open the newest report with:
-
-```bash
-vpsga open
-```
-
-A `file://` path on a remote VPS cannot normally be opened directly by a browser on your own computer because the file exists on the server. For an SSH session, start a private report server:
-
-```bash
-vpsga serve
-```
-
-It binds only to `127.0.0.1` and prints a URL such as:
-
-```text
-http://127.0.0.1:8765/vpsga-20260722-153045.html
-```
-
-Create an SSH tunnel from your own computer:
-
-```bash
-ssh -L 8765:127.0.0.1:8765 USER@SERVER
-```
-
-Then click or open the printed URL locally. The report server is not exposed to the public Internet. Press `Ctrl+C` to stop it.
-
-A different directory or port can be supplied:
-
-```bash
-vpsga serve /root/reports 8877
-```
+The JSON file contains structured findings for automation, history comparison, and future integrations.
 
 ## History comparison
 
@@ -146,8 +101,6 @@ Only the latest 30 state files are retained. Use `--no-history` for a run that s
 ```bash
 vpsga doctor
 vpsga update
-vpsga open [FILE|DIR]
-vpsga serve [FILE|DIR] [PORT]
 vpsga uninstall
 ```
 
@@ -274,9 +227,9 @@ The compatibility command `vps-guard-audit` remains available in `/usr/local/sbi
 | 0 | No warnings or failures |
 | 1 | Warnings found |
 | 2 | Failures found |
-| 64 | Invalid option or port |
+| 64 | Invalid option |
 | 65 | Interactive terminal unavailable |
-| 66 | Missing report, config, or installation source |
+| 66 | Missing config or installation source |
 | 69 | Required files, tools, or installation resources unavailable |
 | 77 | Root privileges required |
 
