@@ -45,3 +45,23 @@ jobs:
           grep -q '使用 AI 获取更详细的修复方案' "$zh_report"
           grep -q 'Summary and next steps' "$en_report"
           grep -q 'Using AI for a more detailed remediation plan' "$en_report"
+      - name: System install and vpsga smoke test
+        run: |
+          sudo ./install.sh
+          test -x /usr/local/bin/vpsga
+          test "$(vpsga --version)" = "4.3.0"
+          mkdir -p "$RUNNER_TEMP/installed"
+          set +e
+          vpsga \
+            --lang en \
+            --profile vps \
+            --no-update-check \
+            --format json \
+            --output-dir "$RUNNER_TEMP/installed" \
+            --quiet
+          rc=$?
+          set -e
+          test "$rc" -ge 0 -a "$rc" -le 2
+          report="$(find "$RUNNER_TEMP/installed" -maxdepth 1 -name 'vps-guard-audit-*.json' -print -quit)"
+          test -n "$report"
+          jq -e '.version == "4.3.0"' "$report"
