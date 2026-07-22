@@ -3,14 +3,14 @@
 
 print_finding_item() {
   local idx="$1" number="$2"
-  local id="${FINDING_IDS[$idx]}" code="${FINDING_CODES[$idx]}" title="${FINDING_TITLES[$idx]}"
-  local detail="${FINDING_DETAILS[$idx]}" rec="${FINDING_RECOMMENDATIONS[$idx]}" category="${FINDING_CATEGORIES[$idx]}"
+  local id="${FINDING_LEGACY_IDS[$idx]}" stable_id="${FINDING_IDS[$idx]}" title="${FINDING_TITLES[$idx]}" detail="${FINDING_DETAILS[$idx]}" rec="${FINDING_RECOMMENDATIONS[$idx]}"
 
   finding_plain_text "$id" "$rec"
 
-  printf '%s) [%s] %s\n' "$number" "$code" "$title"
-  printf '   分类：%s\n' "$category"
-  [[ -n "$detail" ]] && printf '   检测信息：%s\n' "$detail"
+  printf '%s) %s %s\n' "$number" "$stable_id" "$title"
+  if [[ -n "$detail" ]]; then
+    printf '   检测信息：%s\n' "$detail"
+  fi
   printf '   这表示：%s\n' "$PLAIN_MEANING"
   [[ -n "$PLAIN_ACTION" ]] && printf '   建议：%s\n' "$PLAIN_ACTION"
   [[ -n "$PLAIN_CAUTION" ]] && printf '   操作提醒：%s\n' "$PLAIN_CAUTION"
@@ -20,9 +20,9 @@ print_finding_item() {
 print_sysctl_group() {
   local number="$1" idx count=0 details=""
   for idx in "${!FINDING_IDS[@]}"; do
-    if [[ "${FINDING_LEVELS[$idx]}" == WARN && "${FINDING_IDS[$idx]}" == sysctl.* ]]; then
+    if [[ "${FINDING_LEVELS[$idx]}" == WARN && "${FINDING_LEGACY_IDS[$idx]}" == sysctl.* ]]; then
       count=$((count+1))
-      details+="[${FINDING_CODES[$idx]}] ${FINDING_TITLES[$idx]}${FINDING_DETAILS[$idx]:+ — ${FINDING_DETAILS[$idx]}}"$'\n'
+      details+="${FINDING_TITLES[$idx]}${FINDING_DETAILS[$idx]:+ — ${FINDING_DETAILS[$idx]}}"$'\n'
     fi
   done
   ((count > 0)) || return 1
@@ -37,11 +37,12 @@ print_sysctl_group() {
 }
 
 print_bucket_findings() {
-  local bucket="$1" number=1 idx current printed=0
+  local bucket="$1" number=1 idx current
+  local printed=0
   for idx in "${!FINDING_IDS[@]}"; do
     [[ "${FINDING_LEVELS[$idx]}" == WARN ]] || continue
-    [[ "${FINDING_IDS[$idx]}" == sysctl.* ]] && continue
-    current="$(finding_bucket "${FINDING_IDS[$idx]}")"
+    [[ "${FINDING_LEGACY_IDS[$idx]}" == sysctl.* ]] && continue
+    current="$(finding_bucket "${FINDING_LEGACY_IDS[$idx]}")"
     [[ "$current" == "$bucket" ]] || continue
     print_finding_item "$idx" "$number"
     number=$((number+1))
@@ -56,9 +57,9 @@ print_bucket_findings() {
 }
 
 print_ai_handoff() {
+  echo
+  echo "------------------------------------------------------------------------------"
   cat <<'EOF_AI_ZH'
-
-------------------------------------------------------------------------------
 使用 AI 获取更详细的修复方案
 
 请优先提交本次生成的 *-ai.txt 脱敏报告，而不是完整报告。
@@ -74,12 +75,12 @@ AI 脱敏报告会替换部分主机名、用户名、容器名称、域名、IP
 
 可以直接使用下面的提问方式：
 
-请分析这份 VPS Guard Audit 中文报告。
+请分析这份 VPS Guard Audit 报告。
 1. 先用简单语言总结目前的安全状况。
 2. 区分需要尽快处理、建议改进、需要本人确认和可选加固。
 3. 不要把所有监听端口都当成恶意服务。
 4. 每个问题说明原因、实际风险和可能影响的现有服务。
-5. 提供适用于报告中 Ubuntu 或 Debian 版本的修复步骤。
+5. 提供适用于报告中系统版本的修复步骤。
 6. 涉及 SSH、防火墙、Docker、网络或重启时，先说明断连和停机风险。
 7. 修改前提供备份或快照建议，修改后提供验证和回滚方法。
 8. 不要建议清空 iptables/nftables、重置 UFW，或直接关闭当前 SSH 端口。
@@ -92,26 +93,25 @@ EOF_AI_ZH
 audit_summary() {
   local idx number
   prepare_history_comparison
-  section "16. 检测总结与下一步建议"
+  section "$(t summary)"
   TOTAL=$((PASS+WARN+FAIL+INFO+SKIP))
 
   echo "本次检查结论"
-  if ((FAIL > 0)); then
-    echo "发现了需要尽快处理的问题。先不要批量修改配置，应逐项确认，并优先处理账户、SSH、防火墙或明确恶意进程相关问题。"
-  elif ((WARN > 0)); then
-    echo "没有发现明确的高危问题，但有一些项目建议确认或改进。提醒不等于服务器已经被入侵。"
-  else
-    echo "没有发现明确的高危问题，当前基础配置总体正常。"
-  fi
-  echo
-  echo "检查结果概览："
-  echo "  检查正常：$PASS"
-  echo "  建议确认或改进：$WARN"
-  echo "  需要尽快处理：$FAIL"
-  echo "  补充信息：$INFO"
-  echo "  本次未检查：$SKIP"
-  echo "  总检查项：$TOTAL"
-  echo "  检测模式：$MODE"
+    if ((FAIL > 0)); then
+      echo "发现了需要尽快处理的问题。先不要批量修改配置，应逐项确认，并优先处理账户、SSH、防火墙或恶意进程相关问题。"
+    elif ((WARN > 0)); then
+      echo "没有发现明确的高危问题，但有一些项目建议确认或改进。警告不等于服务器已经被入侵。"
+    else
+      echo "没有发现明确的高危问题，当前基础配置总体正常。"
+    fi
+    echo
+    echo "检查结果概览："
+    echo "  检查正常：$PASS"
+    echo "  建议确认或改进：$WARN"
+    echo "  需要尽快处理：$FAIL"
+    echo "  补充信息：$INFO"
+    echo "  本次未检查：$SKIP"
+    echo "  总检查项：$TOTAL"
 
   print_history_comparison
 

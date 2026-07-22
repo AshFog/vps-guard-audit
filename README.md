@@ -1,148 +1,53 @@
 # VPS Guard Audit
 
-**English** | [简体中文](README.zh-CN.md)
+面向中文用户的 Ubuntu / Debian VPS 只读安全审计工具。
 
-VPS Guard Audit is a bilingual, read-only-by-default security audit tool for Ubuntu and Debian. It does not automatically modify SSH, firewalls, users, services, or system configuration. Reports explain findings in plain language and include a more strongly redacted copy intended for analysis by a trusted AI assistant.
+VPS Guard Audit 重点解决三个问题：传统安全报告看不懂、不了解风险含义、不知道下一步该怎样继续排查。它不是“中文版 Lynis”，也不追求检查数量或模糊的安全分数，而是为常见 VPS 场景提供低误报、可解释、可比较的中文审计结果。
 
-## Supported systems
+## 项目特点
 
-Validated releases:
+- 一条命令完成安装和检测；
+- 默认只读，不自动修改 SSH、防火墙、用户、服务或系统配置；
+- 所有程序提示、检查结论、报告和 AI 提示词均使用中文；
+- 每个检查使用固定编号，标题变化不会破坏历史比较；
+- 区分正常、问题、不适用、缺少命令、本机无法确认和需要用户判断；
+- 生成完整中文报告、AI 脱敏报告和 JSON；
+- 自动比较前后两次检测结果；
+- 主要适配 Ubuntu、Debian、Docker、SSH、防火墙和常见 VPS 服务。
 
-- Ubuntu 26.04 LTS
-- Ubuntu 24.04 LTS
-- Ubuntu 22.04 LTS
-- Debian 13
-- Debian 12
-- Debian 11
+## 支持系统
 
-The audit automatically detects `vps`, `server`, `desktop`, and `container` profiles. Other Ubuntu or Debian releases may run, but the report warns when they are outside the validated matrix.
+已验证：
 
-## Quick start
+- Ubuntu 26.04、24.04、22.04 LTS
+- Debian 13、12、11
 
-### First use: install and run
+其他 Ubuntu / Debian 版本通常也能运行，但报告会明确提示其不在已验证范围内。项目不会把未验证结果描述成确定结论。
 
-Copy this single command:
+## 一键安装并检测
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AshFog/vps-guard-audit/main/bootstrap.sh | bash
 ```
 
-It will:
-
-1. display the Chinese / English language menu;
-2. download the complete project;
-3. install or update VPS Guard Audit under `/usr/local/lib/vps-guard-audit`;
-4. create the global command `/usr/local/bin/vpsga`;
-5. verify the installation;
-6. immediately run the audit;
-7. save reports in the directory where the command was launched.
-
-### Every later run
-
-From any directory, use only:
+安装完成后，以后在任意目录直接运行：
 
 ```bash
 vpsga
 ```
 
-A non-root user will be prompted for the sudo password automatically. Reports are returned to the invoking user when the output directory belongs to that user.
+普通用户运行时，`vpsga` 会自动请求 sudo 权限。报告默认保存到执行命令时所在的目录，并在目录属于原用户时自动归还文件所有权。
 
-Do not run this from an arbitrary directory:
-
-```bash
-sudo ./vps-guard-audit.sh
-```
-
-`./` means “find this file in the current directory.” That form works only after cloning the source repository and changing into its directory. It is not the normal installed workflow.
-
-## Verify the installation
-
-```bash
-command -v vpsga
-vpsga --version
-vpsga doctor
-```
-
-Expected command path:
-
-```text
-/usr/local/bin/vpsga
-```
-
-If `vpsga` is unavailable or `vpsga doctor` reports a broken `current` path, run the one-command installer again. The installer migrates older development layouts where `current` was accidentally created as a real directory.
-
-## Update or uninstall
-
-```bash
-vpsga update
-vpsga uninstall
-```
-
-`vpsga update` downloads the current repository version, validates the staged files, installs them, and runs a post-install health check.
-
-`vpsga uninstall` requires explicit confirmation and asks whether audit history should be retained.
-
-## Report files
-
-A normal run creates three matching files with the same timestamp:
-
-```text
-vpsga-20260722-153045-full.txt
-vpsga-20260722-153045-ai.txt
-vpsga-20260722-153045.json
-```
-
-### Full TXT
-
-`*-full.txt` contains the complete technical evidence, natural-language conclusion, findings, cautions, history comparison, and a prompt for requesting an AI-assisted remediation plan.
-
-### AI TXT
-
-`*-ai.txt` applies an additional redaction layer to some:
-
-- hostnames and FQDNs;
-- non-root usernames;
-- Docker container names;
-- configured web domains;
-- IPv4 addresses;
-- email and MAC addresses;
-- SSH fingerprints.
-
-Automatic redaction cannot guarantee that every custom identifier or credential is removed. Review the file before sharing it. Never submit passwords, private keys, API keys, access tokens, cookies, or other credentials.
-
-### JSON
-
-The JSON file contains structured findings for history comparison, automation, and future integrations.
-
-## History comparison
-
-By default, VPS Guard Audit stores compact state files under:
-
-```text
-/var/lib/vps-guard-audit/history/
-```
-
-From the second run onward, the report can show:
-
-- new warnings or failures;
-- findings that have been resolved;
-- severity changes.
-
-Only the latest 30 state files are retained.
-
-Disable history for one run:
-
-```bash
-vpsga --no-history
-```
-
-## Common commands
+## 常用命令
 
 ```bash
 vpsga
-vpsga --lang en
+vpsga --depth quick
+vpsga --depth standard
+vpsga --depth deep
+vpsga --profile web
 vpsga --output-dir /home/user/audit-reports
-vpsga --rootkit-check
+vpsga --format json
 vpsga --no-history
 vpsga --version
 vpsga --help
@@ -151,66 +56,131 @@ vpsga update
 vpsga uninstall
 ```
 
-## Options
+## 检测深度
 
-```text
---lang zh|en
---output-dir DIR
---format text|json|both
---config FILE
---login-lines N
---no-update-check
---refresh-package-index
---profile auto|vps|server|desktop|container
---policy baseline|strict
---full-identifiers
---rootkit-check
---no-history
---quiet
--h, --help
--v, --version
+| 模式 | 适合场景 | 主要行为 |
+|---|---|---|
+| `quick` | 日常快速确认 | 跳过 APT 更新、内核参数和耗时文件扫描 |
+| `standard` | 默认例行审计 | 检查主要系统、网络、SSH、账户、软件包和容器项目 |
+| `deep` | 首次接管或异常排查 | 增加文件权限、SUID/SGID、容器隔离、临时目录和已安装 Rootkit 扫描器检查 |
+
+深度检查可能耗时较长。Rootkit 工具误报较多，结果只能作为继续排查的线索，不能单独证明系统已被入侵。
+
+## 配置档案
+
+`--profile` 支持：
+
+- `auto`：自动选择；
+- `general`：通用 VPS；
+- `web`：网站服务器；
+- `docker`：Docker 主机；
+- `proxy`：代理服务器；
+- `home`：家庭服务器；
+- `desktop`：桌面 Linux。
+
+当前版本主要用档案降低场景误报，后续会继续增加按角色启用检查和端口基线的能力。
+
+源码仓库和安装目录都提供了对应的中文配置模板。例如：
+
+```bash
+sudo vpsga --config /usr/local/lib/vps-guard-audit/current/config/profiles/web.conf
 ```
 
-### Baseline and strict policies
+## 状态标签
 
-`baseline` is the default and avoids treating reasonable OpenSSH defaults as failures. `strict` warns on additional settings such as root public-key login, `MaxAuthTries > 3`, and SSH TCP forwarding.
+终端和 TXT 报告使用以下标签：
 
-## Read-only behavior
+| 标签 | 含义 |
+|---|---|
+| `[正常]` | 检查符合当前基线 |
+| `[提醒]` | 建议确认或改进，不代表已经被入侵 |
+| `[问题]` | 有明确证据，需要尽快处理 |
+| `[信息]` | 帮助理解环境的补充信息 |
+| `[跳过]` | 不适用、缺少条件或当前模式未检查 |
 
-The normal audit does not:
+## 稳定检查编号
 
-- install or remove operating-system packages;
-- edit SSH, sysctl, or firewall settings;
-- change passwords or SSH keys;
-- enable, disable, or restart services;
-- delete logs or user files;
-- automatically repair findings.
+v5 引入固定检查编号，例如：
 
-The first-run bootstrap and `vpsga update` only install or update VPS Guard Audit itself under `/usr/local`.
+```text
+SYS-1001  系统版本支持状态
+NET-2001  全接口监听端口
+FW-3001   防火墙运行状态
+SSH-4001  SSH 密码登录
+USR-5001  异常 UID 0 账户
+PKG-6001  待安装安全更新
+CTR-7001  Docker 对外发布端口
+MAL-8001  临时目录可执行文件
+```
 
-By default, the audit reads the existing APT cache and does **not** run `apt-get update`. The optional `--refresh-package-index` flag refreshes APT metadata and writes under `/var/lib/apt/lists`.
+编号属于检查本身，不随标题改变。端口、用户、容器等可重复对象通过 JSON 的 `instance_key` 区分，因此历史比较既稳定，又不会把多个实例互相覆盖。
 
-`--rootkit-check` launches `rkhunter` or `chkrootkit` only when one is already installed. VPS Guard Audit does not install third-party scanners.
+## 报告文件
 
-## Major checks
+普通检测会生成：
 
-- OS support, host profile, and AppArmor status
-- All-interface TCP and UDP listeners with IPv4/IPv6 deduplication
-- UFW, firewalld, nftables, and iptables backends
-- SSH configuration and login policy
-- Fail2ban, CrowdSec, and sshguard status
-- Debian 13 `wtmpdb`, `last`, `lastb`, journal, and `lslogins` fallbacks
-- Login history and suspicious sources
-- UID 0 accounts, passwords, sudo, and SSH-key summaries
-- Failed services, cron jobs, and systemd timers
-- APT updates, security sources, held packages, kernel, and reboot state
-- Kernel and network hardening settings
-- Sensitive permissions and SUID/SGID files
-- Docker ports, privileges, namespaces, capabilities, and mounts
-- Suspicious processes, deleted executables, and temporary executables
-- Proxy, VPN, miner, scanner, and optional rootkit checks
+```text
+vpsga-20260722-153045-full.txt
+vpsga-20260722-153045-ai.txt
+vpsga-20260722-153045.json
+```
 
-## Optional configuration
+`*-full.txt` 是完整中文人类报告，包含原始证据、自然语言解释、风险提醒、历史比较和 AI 分析提示词。
+
+`*-ai.txt` 会进一步替换部分主机名、用户名、容器名、域名、IPv4、邮箱、MAC 地址和 SSH 指纹。自动脱敏无法保证覆盖所有自定义标识符，分享前仍需亲自检查。不要提交密码、SSH 私钥、API Key、访问令牌、Cookie 或其他凭据。
+
+JSON 使用稳定的机器格式。v5 的核心结构示例：
+
+```json
+{
+  "schema_version": "2.0",
+  "test_id": "SSH-4001",
+  "instance_key": "ssh.password",
+  "status": "warn",
+  "confidence": "needs_review",
+  "applicability": "applicable",
+  "evidence": [],
+  "references": []
+}
+```
+
+JSON 字段名、检查编号、Linux 命令和配置名称保留英文或 ASCII，以保证脚本和外部程序兼容。`ufw`、`systemctl`、`docker`、`apt` 等系统工具的原始输出也不会强行翻译，避免破坏证据。
+
+## 历史比较
+
+默认在 `/var/lib/vps-guard-audit/history/` 保存最多 30 份紧凑状态文件。从第二次检测开始，报告会显示新增问题、已经解决的问题和严重程度变化。
+
+单次禁用历史记录：
+
+```bash
+vpsga --no-history
+```
+
+## 安装完整性保护
+
+v5 在运行和维护过程中会：
+
+- 使用安全 `umask`；
+- 通过运行锁阻止两个 `vpsga` 同时执行；
+- 拒绝覆盖已有文件或符号链接报告路径；
+- 检查安装目录所有者和可写权限；
+- 使用 `MANIFEST.sha256` 校验程序和模块；
+- 按字段解析配置文件，不把配置文件作为 Shell 脚本执行；
+- 在中断或退出时清理临时文件；
+- 通过 `vpsga doctor` 检查命令、模块、权限、语法和完整性。
+
+## 只读边界
+
+默认检测不会安装或删除系统软件包，不编辑 SSH、sysctl、防火墙或账户配置，不重启服务，不删除日志，也不自动修复问题。
+
+以下操作是明确例外：
+
+- 首次安装和 `vpsga update` 只修改 VPS Guard Audit 自身在 `/usr/local` 下的文件；
+- `--refresh-package-index` 会执行 `apt-get update`；
+- 历史比较会写入 `/var/lib/vps-guard-audit/history/`；
+- 报告会写入指定输出目录。
+
+## 配置文件
 
 ```bash
 cp config/audit.conf.example config/audit.conf
@@ -218,55 +188,31 @@ nano config/audit.conf
 sudo vpsga --config config/audit.conf
 ```
 
-The configuration file can define trusted login IPs, intentional custom ports, host profile, audit policy, and output limits.
+配置文件可声明可信登录 IP、主动开放端口、预期 UID 0 用户、配置档案、安全策略、检测深度和输出数量限制。
 
-## Source and contributor workflow
+## 退出码
 
-Normal users do not need to clone the repository. Contributors can use:
-
-```bash
-git clone https://github.com/AshFog/vps-guard-audit.git
-cd vps-guard-audit
-sudo ./install.sh
-vpsga
-```
-
-Only while inside that cloned directory can the raw source script be run directly:
-
-```bash
-sudo ./vps-guard-audit.sh
-```
-
-## Exit codes
-
-| Code | Meaning |
+| 代码 | 含义 |
 |---:|---|
-| 0 | No warnings or failures |
-| 1 | Warnings found |
-| 2 | Failures found |
-| 64 | Invalid option |
-| 65 | Interactive terminal unavailable |
-| 66 | Missing config or installation source |
-| 69 | Required files, tools, or installation resources unavailable |
-| 77 | Root privileges required |
+| 0 | 没有提醒或问题 |
+| 1 | 发现提醒项 |
+| 2 | 发现问题项 |
+| 64 | 命令参数无效 |
+| 66 | 配置或安装源缺失 |
+| 69 | 必要文件、命令或下载资源不可用 |
+| 73 | 报告路径已经存在或不安全 |
+| 75 | 已有检测正在运行 |
+| 76 | 安装权限或完整性校验失败 |
+| 77 | 需要 root 权限 |
 
-A warning or failure exit code is an audit result, not a script crash.
+退出码 1 或 2 表示审计结果，不表示脚本崩溃。
 
-## Security limitations
+## 安全限制
 
-No shell script can prove that a host is clean or that an all-interface listener is reachable from the public Internet. Cloud firewalls, NAT, routers, Docker forwarding, and kernel compromise can change effective exposure.
+任何 Shell 脚本都无法绝对证明主机安全，也无法仅凭本机监听状态证明端口可从互联网访问。云防火墙、NAT、路由、Docker 转发和内核层异常都会影响真实暴露面。
 
-AI-generated remediation steps must also be reviewed. Before SSH, firewall, Docker, networking, or reboot changes, preserve the current session, verify backups or snapshots, and ensure console or rescue access is available.
+涉及 SSH、防火墙、Docker、网络或重启的修改前，应保留当前会话，确认备份或快照，并确保拥有云控制台、VNC、串口控制台或救援模式。VPS Guard Audit 不提供“一键自动修复全部”。
 
-## Development checks
+## 许可证
 
-```bash
-bash -n vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh lib/*.sh
-shellcheck vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh lib/*.sh
-```
-
-GitHub Actions validates syntax, ShellCheck, report bundles, history comparison, clean installation, legacy-layout migration, installed-command execution, and report ownership.
-
-## License
-
-MIT
+VPS Guard Audit 使用 MIT 许可证。项目会学习 Lynis 等工具的审计框架思想和工程方法，但不复制或改写 GPLv3 代码。

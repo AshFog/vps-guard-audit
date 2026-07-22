@@ -85,7 +85,7 @@ audit_access() {
           banned_count="$(awk -F: '/Currently banned:/ {gsub(/[[:space:]]/,"",$2); print $2; exit}' <<<"$SSHD_JAIL")"
           banned_ips="$(sed -n 's/.*Banned IP list:[[:space:]]*//p' <<<"$SSHD_JAIL")"
           sample="$(tr ' ' '\n' <<<"$banned_ips" | sed '/^$/d' | head -n 20 | xargs)"
-          [[ -n "$banned_count" ]] && echo "Banned IP sample (up to 20 of ${banned_count}): ${sample:-none}"
+          [[ -n "$banned_count" ]] && echo "已封禁 IP 示例（共 ${banned_count} 个，最多显示 20 个）：${sample:-无}"
         else
           record WARN f2b.sshd_jail "Fail2ban 未启用 sshd jail" "Fail2ban sshd jail is not enabled"
         fi
@@ -112,8 +112,8 @@ audit_access() {
     [[ "$UID0" == "$EXPECTED_UID0_USERS" ]] \
       && record PASS users.uid0 "UID 0 账户符合预期" "UID 0 accounts match expectation" "$UID0" \
       || record FAIL users.uid0 "发现异常 UID 0 账户" "Unexpected UID 0 accounts" "$UID0"
-    echo "--- sudo group ---"; getent group sudo 2>/dev/null || true
-    echo "--- login-capable accounts ---"; awk -F: '$7 !~ /(nologin|false)$/ {print $1":"$3":"$6":"$7}' /etc/passwd
+    echo "--- sudo 用户组 ---"; getent group sudo 2>/dev/null || true
+    echo "--- 可登录账户 ---"; awk -F: '$7 !~ /(nologin|false)$/ {print $1":"$3":"$6":"$7}' /etc/passwd
     if have visudo; then
       visudo -c >/dev/null 2>&1 \
         && record PASS sudo.syntax "sudoers 配置语法正确" "sudoers syntax is valid" \
@@ -131,7 +131,7 @@ audit_access() {
       [[ -f "$key" ]] || continue
       count="$(grep -cEv '^[[:space:]]*(#|$)' "$key" 2>/dev/null || true)"
       perms="$(stat -c '%a %U:%G' "$key" 2>/dev/null || true)"
-      record INFO "keys.$user" "$user 的 authorized_keys" "$user authorized_keys" "$count key(s), $perms"
+      record INFO "keys.$user" "$user 的 authorized_keys" "$user authorized_keys" "$count 个密钥，$perms"
       if [[ "$FULL_IDENTIFIERS" -eq 1 ]]; then
         ssh-keygen -lf "$key" 2>/dev/null || record WARN "keys.$user.invalid" "$user 的密钥文件无法解析" "$user authorized_keys contains an unparsable key"
       else
@@ -149,14 +149,14 @@ audit_access() {
       SUCCESS_LOGINS="$(last -a -n "$LOGIN_LINES" 2>/dev/null || true)"
       LOGIN_SOURCE="last"
     fi
-    echo "--- successful (${LOGIN_SOURCE:-unavailable}) ---"
+    echo "--- 成功登录（${LOGIN_SOURCE:-不可用}）---"
     if [[ -n "$SUCCESS_LOGINS" ]]; then
       printf '%s\n' "$SUCCESS_LOGINS" | redact_stream
     else
       record SKIP login.success "没有可用的成功登录记录工具或记录" "No successful-login records or compatible tool available"
     fi
 
-    echo "--- failed ---"
+    echo "--- 失败登录 ---"
     FAILED_LOGINS=""
     FAILED_SOURCE=""
     if have lastb; then
@@ -172,7 +172,7 @@ audit_access() {
     else
       record SKIP login.failed "缺少 lastb/journalctl，跳过失败登录记录" "lastb and journalctl are unavailable; failed-login history skipped"
     fi
-    [[ -n "$FAILED_SOURCE" ]] && echo "failed-login source: $FAILED_SOURCE"
+    [[ -n "$FAILED_SOURCE" ]] && echo "失败登录记录来源：$FAILED_SOURCE"
     [[ -n "$FAILED_LOGINS" ]] \
       && printf '%s\n' "$FAILED_LOGINS" | redact_stream \
       || record INFO login.failed.none "近期未读取到失败登录记录" "No recent failed-login records were read"

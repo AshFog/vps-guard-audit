@@ -1,22 +1,24 @@
-# Optional VPS Guard Audit configuration
-# Leave values empty or keep defaults unless you need customization.
+# VPS Guard Audit 可选配置
+# 没有定制需求时请保留空值或默认值。
 
-# Successful-login IPs you recognize. Raw values are used for matching even
-# when the displayed report is redacted.
+# 你确认属于自己的成功登录 IP。即使报告中已脱敏，匹配仍使用原始值。
 TRUSTED_LOGIN_IPS=""
 
-# Extra all-interface ports intentionally exposed by this host.
+# 本机主动对全部接口开放的额外端口。
 CUSTOM_ALLOWED_TCP_PORTS=""
 CUSTOM_ALLOWED_UDP_PORTS=""
 
-# Normally only root should have UID 0.
+# 通常只有 root 应拥有 UID 0。
 EXPECTED_UID0_USERS="root"
 
-# auto, vps, server, desktop, container
+# auto、general、web、docker、proxy、home、desktop
 PROFILE="auto"
 
-# baseline or strict
+# baseline（常用基线）或 strict（严格策略）
 POLICY="baseline"
 
-# Maximum rows printed for long inventories.
+# quick（快速）、standard（标准）或 deep（深度）
+DEPTH="standard"
+
+# 长清单最多显示的行数。
 MAX_LIST_ITEMS=20

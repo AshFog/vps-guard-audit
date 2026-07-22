@@ -3,12 +3,12 @@
 
 audit_platform() {
     section "$(t system)"
-    echo "Profile: $HOST_PROFILE"
-    echo "Policy: $POLICY"
-    echo "Hostname: $HOST"
-    echo "Kernel: $(uname -srmo 2>/dev/null || true)"
-    echo "Virtualization: $(systemd-detect-virt 2>/dev/null || echo unknown)"
-    echo "Chassis: $(hostnamectl chassis 2>/dev/null || echo unknown)"
+    echo "配置档案：$HOST_PROFILE"
+    echo "安全策略：$POLICY"
+    echo "主机名：$HOST"
+    echo "内核：$(uname -srmo 2>/dev/null || true)"
+    echo "虚拟化：$(systemd-detect-virt 2>/dev/null || echo 未知)"
+    echo "设备类型：$(hostnamectl chassis 2>/dev/null || echo 未知)"
     safe uptime
     [[ -r /etc/os-release ]] && grep -E '^(PRETTY_NAME|VERSION_ID|VERSION_CODENAME|ID)=' /etc/os-release
     if [[ "$FULL_IDENTIFIERS" -eq 1 ]]; then safe hostnamectl; fi
@@ -16,7 +16,7 @@ audit_platform() {
 
     if [[ "$(cat /proc/1/comm 2>/dev/null || true)" == systemd ]]; then
       record PASS platform.systemd "systemd 正常作为 PID 1 运行" "systemd is running as PID 1"
-    elif [[ "$HOST_PROFILE" == container ]]; then
+    elif [[ "$IS_CONTAINER" -eq 1 ]]; then
       record INFO platform.systemd "容器中 systemd 不是 PID 1，部分宿主机检查不可见" "systemd is not PID 1 in this container; some host checks are unavailable"
     else
       record WARN platform.systemd "systemd 不是 PID 1，部分检查可能不完整" "systemd is not PID 1; some checks may be incomplete"
@@ -27,7 +27,7 @@ audit_platform() {
         && record PASS kernel.apparmor "AppArmor 已启用" "AppArmor is enabled" \
         || record WARN kernel.apparmor "AppArmor 模块存在但未启用" "AppArmor module exists but is not enabled" "" \
           "启用 AppArmor 并确认关键配置文件处于 enforce 模式。" "Enable AppArmor and enforce profiles for important services."
-    elif [[ "$HOST_PROFILE" == container ]]; then
+    elif [[ "$IS_CONTAINER" -eq 1 ]]; then
       record INFO kernel.apparmor "容器中无法确认宿主机 AppArmor 状态" "Host AppArmor state is not visible from this container"
     else
       record WARN kernel.apparmor "未检测到 AppArmor" "AppArmor is unavailable"
@@ -53,7 +53,7 @@ audit_platform() {
         proto="$(awk '{print $1}' <<<"$line")"
         local_ep="$(awk '{print $5}' <<<"$line")"
         process="$(sed -n 's/.*users:/users:/p' <<<"$line")"
-        [[ -n "$process" ]] || process="process unavailable"
+        [[ -n "$process" ]] || process="进程信息不可用"
         addr=""; port=""
         if [[ "$local_ep" =~ ^\[(.*)\]:([0-9]+)$ ]]; then
           addr="${BASH_REMATCH[1]}"; port="${BASH_REMATCH[2]}"
@@ -185,7 +185,7 @@ audit_platform() {
       firewall_evaluable=1
       NFT="$(nft list ruleset 2>/dev/null || true)"
       nft_tables="$(grep -c '^table ' <<<"$NFT" || true)"
-      echo "nftables tables: $nft_tables"
+      echo "nftables 表数量：$nft_tables"
       if grep -Eq 'hook input[^;]*;[^}]*policy drop|hook input.*policy drop' <<<"$NFT"; then
         record PASS fw.nft.input "nftables 存在默认丢弃的 input 基链" "nftables has an input base chain with drop policy"
         firewall_ok=1
@@ -199,7 +199,7 @@ audit_platform() {
     IPT=""
     if have iptables; then
       firewall_evaluable=1
-      echo "iptables backend: $(iptables -V 2>/dev/null || true)"
+      echo "iptables 后端：$(iptables -V 2>/dev/null || true)"
       IPT="$(iptables -S INPUT 2>/dev/null || true)"
       echo "$IPT"
       grep -q '^-P INPUT DROP' <<<"$IPT" \
@@ -212,7 +212,7 @@ audit_platform() {
       ' <<<"$IPT")"
       if [[ -n "$pre_ufw_accept" ]]; then
         count="$(wc -l <<<"$pre_ufw_accept" | tr -d ' ')"
-        record WARN fw.pre_ufw_accept "发现位于 UFW 链之前的额外 ACCEPT 规则" "Extra ACCEPT rules exist before UFW chains" "$count rule(s)" \
+        record WARN fw.pre_ufw_accept "发现位于 UFW 链之前的额外 ACCEPT 规则" "Extra ACCEPT rules exist before UFW chains" "$count 条规则" \
           "这些规则可能绕过 UFW；确认来源后再处理。" "These rules may bypass UFW; verify their source before changing them."
         echo "$pre_ufw_accept"
       else
@@ -223,7 +223,7 @@ audit_platform() {
     fi
 
     if ((firewall_ok == 0)); then
-      if [[ "$HOST_PROFILE" == container ]]; then
+      if [[ "$IS_CONTAINER" -eq 1 ]]; then
         record SKIP fw.none "容器内无法确认宿主机默认拒绝防火墙" "The host default-deny firewall cannot be confirmed from this container"
       elif ((firewall_evaluable == 0)); then
         record FAIL fw.none "缺少可用的防火墙工具，无法确认默认拒绝策略" "No usable firewall tool was found to confirm a default-deny policy" "" \
