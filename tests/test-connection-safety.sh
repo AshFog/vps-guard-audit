@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Automatic rollback intentionally rejects transactions not owned by root.
+# Re-run this isolated fake-system test with sudo so it exercises that same
+# production ownership invariant on non-root CI runners.
+if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+  command -v sudo >/dev/null 2>&1 || {
+    echo 'Connection safety tests require root or sudo.' >&2
+    exit 77
+  }
+  exec sudo bash "$0"
+fi
+
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 work="$(mktemp -d)"
 root="$work/root"
