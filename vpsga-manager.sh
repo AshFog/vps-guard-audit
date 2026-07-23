@@ -323,7 +323,9 @@ cmd_connection_check() {
   admins="$(connection_guard_list_admins || true)"
   if [[ -n "$admins" ]]; then
     echo "[正常] 可用于第二终端验证的备用管理员："
-    sed 's/^/  - /' <<<"$admins"
+    while IFS= read -r admin; do
+      printf '  - %s\n' "$admin"
+    done <<<"$admins"
   else
     echo "[问题] 没有找到同时具备 sudo/admin 权限与安全公钥的非 root 管理员。"
     return 1
