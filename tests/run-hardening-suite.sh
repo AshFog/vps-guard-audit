@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Sensitive rollback tests intentionally require root-owned transaction state.
+# The suite only uses temporary system roots and fake service/network commands,
+# so non-root CI runners can safely execute the whole isolated suite via sudo.
+if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+  command -v sudo >/dev/null 2>&1 || {
+    echo 'The isolated hardening suite requires root or sudo.' >&2
+    exit 77
+  }
+  exec sudo bash "$0"
+fi
+
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$project_dir"
 
