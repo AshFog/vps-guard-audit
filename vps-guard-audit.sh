@@ -186,6 +186,34 @@ case "$DEPTH" in
   deep) CHECK_ROOTKITS=1 ;;
 esac
 
+prepare_output_directory() {
+  local requested="$OUTPUT_DIR"
+
+  if [[ -e "$requested" || -L "$requested" ]]; then
+    [[ -d "$requested" ]] || {
+      echo "报告输出路径不是目录：$requested" >&2
+      exit 73
+    }
+  elif [[ "${SUDO_UID:-}" =~ ^[0-9]+$ && "${SUDO_GID:-}" =~ ^[0-9]+$ && "$SUDO_UID" -ne 0 ]]; then
+    install -d -m 0700 -o "$SUDO_UID" -g "$SUDO_GID" -- "$requested" || {
+      echo "无法为当前调用用户创建报告目录：$requested" >&2
+      exit 73
+    }
+  else
+    mkdir -p -- "$requested" || {
+      echo "无法创建报告目录：$requested" >&2
+      exit 73
+    }
+  fi
+
+  OUTPUT_DIR="$(cd -- "$requested" 2>/dev/null && pwd -P)" || {
+    echo "无法进入报告目录：$requested" >&2
+    exit 73
+  }
+}
+
+prepare_output_directory
+
 declare -A ZH
 ZH[title]="VPS Guard Audit 完整报告"
 ZH[readonly]="检测过程只读：只有明确输入 APPLY 执行已开放加固项，或使用 --refresh-package-index 时才会修改系统"
@@ -221,8 +249,6 @@ echo
 echo "$(t readonly)"
 echo "$(t start)"
 
-mkdir -p "$OUTPUT_DIR"
-OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd -P)"
 HOST="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo unknown)"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 FULL_REPORT="${OUTPUT_DIR}/vpsga-${STAMP}-full.txt"

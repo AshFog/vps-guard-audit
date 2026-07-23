@@ -170,12 +170,13 @@ jobs:
       - name: 非 root 运行与报告所有权
         run: |
           out="$RUNNER_TEMP/user-owned-reports"
-          mkdir -p "$out"
           set +e
           /usr/local/bin/vpsga --depth quick --no-history --format both --output-dir "$out" --quiet
           rc=$?
           set -e
           test "$rc" -ge 0 -a "$rc" -le 2
+          test "$(stat -c %u "$out")" = "$(id -u)"
+          test "$(stat -c %a "$out")" = "700"
           while IFS= read -r report; do
             test "$(stat -c %u "$report")" = "$(id -u)"
             test "$(stat -c %a "$report")" = "600"

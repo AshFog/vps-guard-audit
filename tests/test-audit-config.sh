@@ -25,7 +25,6 @@ EOF
 chmod 0600 "$safe_config"
 
 valid_output="$work/valid-output"
-mkdir -p "$valid_output"
 set +e
 env VPSGA_LOCK_DIR="$work/valid-lock" bash "$audit" \
   --config "$safe_config" \
@@ -38,12 +37,19 @@ valid_rc=$?
 set -e
 ((valid_rc >= 0 && valid_rc <= 2))
 
+[[ -d "$valid_output" ]]
 valid_report="$(find "$valid_output" -maxdepth 1 -type f -name 'vpsga-*.json' -print -quit)"
 [[ -n "$valid_report" ]]
 [[ "$(find "$valid_output" -maxdepth 1 -type f | wc -l)" -eq 1 ]]
 grep -Fq '  "profile": "web",' "$valid_report"
 grep -Fq '  "policy": "strict",' "$valid_report"
 grep -Fq '  "depth": "quick",' "$valid_report"
+if [[ "${SUDO_UID:-}" =~ ^[0-9]+$ && "${SUDO_GID:-}" =~ ^[0-9]+$ && "$SUDO_UID" -ne 0 ]]; then
+  [[ "$(stat -c %u "$valid_output")" == "$SUDO_UID" ]]
+  [[ "$(stat -c %g "$valid_output")" == "$SUDO_GID" ]]
+  [[ "$(stat -c %u "$valid_report")" == "$SUDO_UID" ]]
+  [[ "$(stat -c %g "$valid_report")" == "$SUDO_GID" ]]
+fi
 
 assert_config_rejected() {
   local label="$1" config="$2" expected_rc="$3" expected_message="$4"
