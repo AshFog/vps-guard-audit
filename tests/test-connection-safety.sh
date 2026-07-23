@@ -49,7 +49,7 @@ token="$(connection_guard_start milo 'CONSOLE READY')"
 # 令牌必须先绑定到已经修改且已启动自动回滚的具体事务。
 target="$root/etc/firewall-test.conf"
 printf 'before\n' >"$target"
-hardening_tx_begin HARD-2003
+hardening_tx_begin HARD-2008
 hardening_tx_capture "$target"
 printf 'confirmed\n' >"$target"
 hardening_tx_mark_pending_confirmation
@@ -81,7 +81,7 @@ grep -q $'^cancel\t' "$timer_log"
 hardening_tx_close
 
 # 未确认事务超时后应恢复到本次修改之前的状态。
-hardening_tx_begin HARD-2003
+hardening_tx_begin HARD-2008
 hardening_tx_capture "$target"
 printf 'timeout-change\n' >"$target"
 hardening_tx_mark_pending_confirmation
@@ -97,7 +97,7 @@ grep -qx confirmed "$target"
 grep -q '^status=rolled_back$' "$state/$tx_auto/status"
 
 # timer 不能覆盖事务完成后由管理员或其他工具写入的新配置。
-hardening_tx_begin HARD-2003
+hardening_tx_begin HARD-2008
 hardening_tx_capture "$target"
 printf 'pending\n' >"$target"
 hardening_tx_mark_pending_confirmation

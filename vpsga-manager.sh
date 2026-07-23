@@ -337,6 +337,12 @@ cmd_connection_check() {
   echo "[待确认] 仍需人工确认 VPS 网页控制台、VNC 或救援模式可用。"
 }
 
+cmd_firewall_plan() {
+  need_root firewall-plan
+  load_hardening_runtime
+  hardening_firewall_plan
+}
+
 cmd_connection_confirm() {
   need_root connection-confirm "$@"
   local token="${1:-}"
@@ -392,6 +398,7 @@ VPS Guard Audit 管理命令：
   vpsga rollback               列出最近的加固事务
   vpsga rollback <事务编号>    交互确认后恢复该事务
   vpsga connection-check        检查连接敏感加固的防失联前置条件
+  vpsga firewall-plan           只读列出 SSH、监听端口、Docker 发布端口和 UFW 规则
   vpsga connection-confirm TOKEN
                                 从第二 SSH 终端确认备用登录可用
   vpsga uninstall              卸载程序
@@ -404,6 +411,7 @@ case "${1:-}" in
   rollback) shift; cmd_rollback "$@" ;;
   rollback-auto) shift; cmd_rollback_auto "$@" ;;
   connection-check) shift; cmd_connection_check "$@" ;;
+  firewall-plan) shift; cmd_firewall_plan "$@" ;;
   connection-confirm) shift; cmd_connection_confirm "$@" ;;
   uninstall) shift; cmd_uninstall "$@" ;;
   -h|--help|help|"") usage ;;

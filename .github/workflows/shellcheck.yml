@@ -22,7 +22,7 @@ jobs:
 
       - name: 中文定位和版本
         run: |
-          test "$(bash ./vps-guard-audit.sh --version)" = "6.0.0-dev.5"
+          test "$(bash ./vps-guard-audit.sh --version)" = "6.0.0-dev.6"
           help_output="$(bash ./vps-guard-audit.sh --help)"
           grep -q '用法' <<<"$help_output"
           grep -q -- '--depth quick|standard|deep' <<<"$help_output"
@@ -39,7 +39,7 @@ jobs:
           set -e
           test "$rc" -ge 0 -a "$rc" -le 2
           report="$(find "$RUNNER_TEMP/json" -maxdepth 1 -name 'vpsga-*.json' -print -quit)"
-          jq -e '.version == "6.0.0-dev.5" and .schema_version == "2.0" and .language == "zh-CN" and .depth == "quick" and (.findings | type == "array") and (.findings[0].test_id | test("^[A-Z]+-[0-9]{4}$")) and (.findings[0].evidence | type == "array")' "$report"
+          jq -e '.version == "6.0.0-dev.6" and .schema_version == "2.0" and .language == "zh-CN" and .depth == "quick" and (.findings | type == "array") and (.findings[0].test_id | test("^[A-Z]+-[0-9]{4}$")) and (.findings[0].evidence | type == "array")' "$report"
 
       - name: 18 项加固注册表与只读计划
         run: |
@@ -103,6 +103,7 @@ jobs:
           bash tests/test-hardening-system.sh
           bash tests/test-connection-safety.sh
           bash tests/test-hardening-sensitive-ssh.sh
+          bash tests/test-hardening-network.sh
 
       - name: 中文报告与历史比较
         run: |
@@ -140,10 +141,12 @@ jobs:
           test -x /usr/local/bin/vpsga
           test -L /usr/local/lib/vps-guard-audit/current
           test -f /usr/local/lib/vps-guard-audit/current/MANIFEST.sha256
-          test "$(/usr/local/bin/vpsga --version)" = "6.0.0-dev.5"
+          test "$(/usr/local/bin/vpsga --version)" = "6.0.0-dev.6"
           /usr/local/bin/vpsga doctor
           /usr/local/bin/vpsga connection-check >"$RUNNER_TEMP/connection-check.txt" 2>&1 || true
           grep -q '连接敏感加固前置检查' "$RUNNER_TEMP/connection-check.txt"
+          /usr/local/bin/vpsga firewall-plan >"$RUNNER_TEMP/firewall-plan.txt" 2>&1 || true
+          grep -q '当前不是可验证的 SSH 会话\|防火墙端口计划' "$RUNNER_TEMP/firewall-plan.txt"
           set +e
           /usr/local/bin/vpsga connection-confirm invalid-token >"$RUNNER_TEMP/connection-confirm.txt" 2>&1
           confirm_rc=$?
@@ -162,7 +165,7 @@ jobs:
           sudo cp lib/*.sh /usr/local/lib/vps-guard-audit/current/lib/
           sudo bash ./install.sh
           test -L /usr/local/lib/vps-guard-audit/current
-          test "$(readlink -f /usr/local/lib/vps-guard-audit/current)" = "/usr/local/lib/vps-guard-audit/releases/6.0.0-dev.5"
+          test "$(readlink -f /usr/local/lib/vps-guard-audit/current)" = "/usr/local/lib/vps-guard-audit/releases/6.0.0-dev.6"
           /usr/local/bin/vpsga doctor
 
       - name: 非 root 运行与报告所有权

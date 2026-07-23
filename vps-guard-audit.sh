@@ -2,14 +2,14 @@
 # VPS Guard Audit
 # 面向中文用户的 Ubuntu / Debian VPS 安全审计与可控加固工具。
 # Supported: Ubuntu 26.04/24.04/22.04 LTS and Debian 13/12/11.
-# Version: 6.0.0-dev.5
+# Version: 6.0.0-dev.6
 
 set -uo pipefail
 IFS=$'\n\t'
 export LC_ALL=C LANG=C
 umask 077
 
-VERSION="6.0.0-dev.5"
+VERSION="6.0.0-dev.6"
 SCHEMA_VERSION="2.0"
 COMMAND="audit"
 AFTER_AUDIT="auto"

@@ -46,13 +46,13 @@ hardening_registry_visit() {
     "critical" "ssh.password" "/etc/ssh/sshd_config.d/90-vpsga-hardening.conf" "yes" "HARD-2002"
   register_hardening_action "HARD-2003" "sensitive" "启用 UFW 防火墙" \
     "必须先识别并放行当前 SSH、网站、面板、代理及容器所需端口。" \
-    "critical" "fw.none,fw.ufw.absent" "/etc/ufw/*" "planned" "HARD-2003"
+    "critical" "fw.none,fw.ufw.absent" "/etc/ufw/*" "yes" "HARD-2003"
   register_hardening_action "HARD-2004" "sensitive" "清理或收紧防火墙规则" \
     "过时规则也可能仍被业务依赖，删除前必须逐条确认端口用途。" \
-    "high" "fw.ufw.stale,fw.pre_ufw_accept" "/etc/ufw/*" "planned" "HARD-2004"
+    "high" "fw.ufw.stale" "/etc/ufw/user.rules /etc/ufw/user6.rules" "yes" "HARD-2004"
   register_hardening_action "HARD-2005" "sensitive" "启用 Fail2ban SSH 防护" \
     "来源 IP 不稳定或白名单错误时，管理员可能被临时封禁。" \
-    "high" "f2b.absent,f2b.active,f2b.sshd_jail" "/etc/fail2ban/jail.d/vpsga-sshd.local" "planned" "HARD-2005"
+    "high" "f2b.absent,f2b.active,f2b.sshd_jail" "/etc/fail2ban/jail.d/vpsga-sshd.local" "yes" "HARD-2005"
   register_hardening_action "HARD-2006" "sensitive" "关闭 SSH 端口转发" \
     "会中断 SSH 隧道、开发工具、代理转发和部分远程管理工作流。" \
     "high" "ssh.forward" "/etc/ssh/sshd_config.d/90-vpsga-hardening.conf" "planned" "HARD-2006"

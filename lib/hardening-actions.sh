@@ -311,6 +311,259 @@ hardening_validate_2002() {
     hardening_ssh_validate_setting KbdInteractiveAuthentication no
 }
 
+hardening_ufw_command() {
+  if [[ -n "${VPSGA_TEST_UFW_BIN:-}" ]]; then
+    bash "$VPSGA_TEST_UFW_BIN" "$@"
+  else
+    LC_ALL=C command ufw "$@"
+  fi
+}
+
+hardening_systemctl_command() {
+  if [[ -n "${VPSGA_TEST_SYSTEMCTL_BIN:-}" ]]; then
+    bash "$VPSGA_TEST_SYSTEMCTL_BIN" "$@"
+  else
+    command systemctl "$@"
+  fi
+}
+
+hardening_firewall_plan() {
+  local context ssh_port listeners
+  context="$(connection_guard_current_context)" || return
+  ssh_port="$(cut -f4 <<<"$context")"
+  echo "防火墙端口计划（只读）"
+  echo "  当前 SSH 必须保留：$ssh_port/tcp"
+  if command -v ss >/dev/null 2>&1; then
+    listeners="$(ss -H -lntu 2>/dev/null | awk '
+      {
+        proto=$1; endpoint=$5
+        if (proto !~ /^(tcp|udp)$/) next
+        sub(/^.*:/, "", endpoint)
+        if (endpoint ~ /^[0-9]+$/) seen[endpoint "/" proto]=1
+      }
+      END { for (item in seen) print item }
+    ' | sort -t/ -k1,1n -k2,2)"
+    if [[ -n "$listeners" ]]; then
+      echo "  当前监听端口（仅供审核，不会自动全部放行）："
+      sed 's/^/    - /' <<<"$listeners"
+    else
+      echo "  未取得监听端口；请通过业务配置人工确认。"
+    fi
+  else
+    echo "  缺少 ss，无法列出监听端口。"
+  fi
+  if command -v docker >/dev/null 2>&1; then
+    listeners="$(docker ps --format '{{.Ports}}' 2>/dev/null | sed '/^[[:space:]]*$/d' || true)"
+    if [[ -n "$listeners" ]]; then
+      echo "  Docker 发布端口（请逐项确认）："
+      sed 's/^/    - /' <<<"$listeners"
+      echo "    警告：Docker 发布端口可能绕过 UFW 的普通入站规则；本动作不会改写 DOCKER-USER 链。"
+    fi
+  fi
+  if command -v ufw >/dev/null 2>&1 || [[ -n "${VPSGA_TEST_UFW_BIN:-}" ]]; then
+    echo "  当前 UFW 规则："
+    hardening_ufw_command status numbered 2>/dev/null | sed 's/^/    /' || true
+  fi
+  echo "  注意：127.0.0.1/::1 上的服务不需要公网放行；UDP 必须明确写成 端口/udp。"
+}
+
+hardening_install_official_package() {
+  local command_name="$1" package="$2"
+  command -v "$command_name" >/dev/null 2>&1 && return 0
+  command -v apt-get >/dev/null 2>&1 || {
+    echo "缺少 $command_name，且当前系统没有 apt-get。" >&2
+    return 69
+  }
+  DEBIAN_FRONTEND=noninteractive apt-get install -y "$package" || return
+  command -v "$command_name" >/dev/null 2>&1
+}
+
+hardening_parse_ufw_specs() {
+  local raw="$1" required_port="$2" item port proto found=0
+  local -A seen=()
+  [[ -n "$raw" && "$raw" != *$'\n'* && "$raw" != *$'\t'* ]] || return 64
+  for item in $raw; do
+    [[ "$item" =~ ^([0-9]{1,5})/(tcp|udp)$ ]] || return 64
+    port="${BASH_REMATCH[1]}"; proto="${BASH_REMATCH[2]}"
+    ((10#$port >= 1 && 10#$port <= 65535)) || return 64
+    [[ -z "${seen[$port/$proto]+x}" ]] || continue
+    seen[$port/$proto]=1
+    printf '%s/%s\n' "$((10#$port))" "$proto"
+    [[ "$proto" == tcp && "$((10#$port))" == "$required_port" ]] && found=1
+  done
+  ((found == 1)) || {
+    echo "放行清单必须包含当前 SSH 端口 ${required_port}/tcp。" >&2
+    return 65
+  }
+}
+
+hardening_ufw_capture_state() {
+  local path status
+  status="$(hardening_ufw_command status 2>/dev/null | sed -n 's/^Status: //p' | head -n1)"
+  [[ "$status" == active || "$status" == inactive ]] || {
+    echo "无法可靠识别 UFW 当前状态，拒绝修改。" >&2
+    return 69
+  }
+  printf '%s\n' "$status" >"$HARDENING_TX_DIR/ufw-before"
+  chmod 0600 -- "$HARDENING_TX_DIR/ufw-before"
+  for path in /etc/default/ufw /etc/ufw/user.rules /etc/ufw/user6.rules /lib/ufw/user.rules /lib/ufw/user6.rules; do
+    hardening_tx_capture "$(hardening_system_path "$path")" || return
+  done
+}
+
+hardening_action_2003() {
+  local context ssh_port specs spec
+  context="$(connection_guard_current_context)" || return
+  ssh_port="$(cut -f4 <<<"$context")"
+  specs="$(hardening_parse_ufw_specs "${VPSGA_UFW_ALLOW_SPECS:-}" "$ssh_port")" || return
+  hardening_ufw_capture_state || return
+  hardening_ufw_command default deny incoming || return
+  hardening_ufw_command default allow outgoing || return
+  while IFS= read -r spec; do
+    hardening_ufw_command allow "$spec" || return
+  done <<<"$specs"
+  hardening_ufw_command --force enable
+}
+
+hardening_validate_2003() {
+  local context ssh_port specs spec status
+  context="$(connection_guard_current_context)" || return
+  ssh_port="$(cut -f4 <<<"$context")"
+  specs="$(hardening_parse_ufw_specs "${VPSGA_UFW_ALLOW_SPECS:-}" "$ssh_port")" || return
+  status="$(hardening_ufw_command status verbose)" || return
+  grep -q '^Status: active' <<<"$status" || return 1
+  grep -q 'Default: deny (incoming)' <<<"$status" || return 1
+  while IFS= read -r spec; do
+    grep -Eq "^${spec//\//\\/}[[:space:]]+ALLOW[[:space:]]+IN" <<<"$status" || return 1
+  done <<<"$specs"
+}
+
+hardening_parse_ufw_delete_numbers() {
+  local raw="$1" item
+  local -A seen=()
+  [[ -n "$raw" && "$raw" != *$'\n'* && "$raw" != *$'\t'* ]] || return 64
+  for item in $raw; do
+    [[ "$item" =~ ^[1-9][0-9]*$ ]] || return 64
+    ((item <= 9999)) || return 64
+    seen[$item]=1
+  done
+  printf '%s\n' "${!seen[@]}" | sort -rn
+}
+
+hardening_action_2004() {
+  local numbers number before selected
+  numbers="$(hardening_parse_ufw_delete_numbers "${VPSGA_UFW_DELETE_NUMBERS:-}")" || return
+  before="$(hardening_ufw_command status numbered)" || return
+  grep -q '^Status: active' <<<"$before" || {
+    echo "UFW 当前未启用，拒绝清理规则。" >&2
+    return 65
+  }
+  while IFS= read -r number; do
+    grep -Eq "^\[[[:space:]]*${number}\]" <<<"$before" || {
+      echo "UFW 规则编号不存在：$number" >&2
+      return 65
+    }
+  done <<<"$numbers"
+  hardening_ufw_capture_state || return
+  selected="$(while IFS= read -r number; do
+    sed -n -E "s/^\[[[:space:]]*${number}\][[:space:]]*//p" <<<"$before"
+  done <<<"$numbers")"
+  [[ -n "$selected" ]] || return 65
+  printf '%s\n' "$selected" >"$HARDENING_TX_DIR/ufw-deleted-rules"
+  printf '%s\n' "$numbers" >"$HARDENING_TX_DIR/ufw-deleted-numbers"
+  chmod 0600 -- "$HARDENING_TX_DIR/ufw-deleted-numbers" "$HARDENING_TX_DIR/ufw-deleted-rules"
+  while IFS= read -r number; do
+    hardening_ufw_command --force delete "$number" || return
+  done <<<"$numbers"
+}
+
+hardening_validate_2004() {
+  local after rule
+  after="$(hardening_ufw_command status numbered)" || return
+  grep -q '^Status: active' <<<"$after" || return 1
+  while IFS= read -r rule; do
+    [[ -n "$rule" ]] || continue
+    ! sed -E 's/^\[[[:space:]]*[0-9]+\][[:space:]]*//' <<<"$after" | grep -Fqx -- "$rule" || return 1
+  done <"$HARDENING_TX_DIR/ufw-deleted-rules"
+}
+
+hardening_fail2ban_path() {
+  hardening_system_path /etc/fail2ban/jail.d/vpsga-sshd.local
+}
+
+hardening_action_2005() {
+  local context ssh_port client_ip marker content enabled active
+  context="$(connection_guard_current_context)" || return
+  client_ip="$(cut -f1 <<<"$context")"; ssh_port="$(cut -f4 <<<"$context")"
+  [[ "$client_ip" =~ ^[0-9A-Fa-f:.]+$ ]] || return 65
+  enabled=0; active=0
+  if [[ "${VPSGA_FAIL2BAN_PREINSTALL_STATE:-}" != missing ]]; then
+    hardening_systemctl_command is-enabled --quiet fail2ban 2>/dev/null && enabled=1
+    hardening_systemctl_command is-active --quiet fail2ban 2>/dev/null && active=1
+  fi
+  printf 'enabled=%s\nactive=%s\n' "$enabled" "$active" >"$HARDENING_TX_DIR/fail2ban-before"
+  chmod 0600 -- "$HARDENING_TX_DIR/fail2ban-before"
+  unset VPSGA_FAIL2BAN_PREINSTALL_STATE
+  hardening_ensure_managed_directory "$(hardening_system_path /etc/fail2ban/jail.d)" || return
+  marker='# Managed by VPS Guard Audit. Local edits may be replaced.'
+  content="$marker
+[sshd]
+enabled = true
+port = $ssh_port
+backend = systemd
+maxretry = 5
+findtime = 10m
+bantime = 10m
+ignoreip = 127.0.0.1/8 ::1 $client_ip
+"
+  hardening_write_managed_file "$(hardening_fail2ban_path)" "$content" "$marker" || return
+  if [[ -n "${VPSGA_TEST_FAIL2BAN_BIN:-}" ]]; then
+    bash "$VPSGA_TEST_FAIL2BAN_BIN" test || return
+  else
+    fail2ban-client -t || return
+  fi
+  hardening_systemctl_command enable --now fail2ban || return
+  hardening_systemctl_command restart fail2ban
+}
+
+hardening_sensitive_preflight() {
+  case "$1" in
+    HARD-2003|HARD-2004)
+      if [[ -z "${VPSGA_TEST_UFW_BIN:-}" ]]; then
+        hardening_install_official_package ufw ufw || return
+        if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+          echo "firewalld 正在运行，拒绝同时使用 UFW。请先选择唯一的防火墙方案。" >&2
+          return 65
+        fi
+      fi
+      ;;
+    HARD-2005)
+      if [[ -z "${VPSGA_TEST_FAIL2BAN_BIN:-}" ]] && ! command -v fail2ban-client >/dev/null 2>&1; then
+        VPSGA_FAIL2BAN_PREINSTALL_STATE=missing
+        hardening_install_official_package fail2ban-client fail2ban || return
+        # Debian/Ubuntu 的软件包安装脚本可能自动启动服务；真正启用必须留在受保护事务内。
+        hardening_systemctl_command stop fail2ban || return
+        hardening_systemctl_command disable fail2ban || return
+      fi
+      ;;
+  esac
+}
+
+hardening_validate_2005() {
+  local context ssh_port path status
+  context="$(connection_guard_current_context)" || return
+  ssh_port="$(cut -f4 <<<"$context")"; path="$(hardening_fail2ban_path)"
+  [[ -f "$path" && ! -L "$path" && "$(stat -c %a "$path")" == 600 ]] || return 1
+  grep -Eq "^[[:space:]]*port[[:space:]]*=[[:space:]]*$ssh_port[[:space:]]*$" "$path" || return 1
+  hardening_systemctl_command is-active --quiet fail2ban || return 1
+  if [[ -n "${VPSGA_TEST_FAIL2BAN_BIN:-}" ]]; then
+    status="$(bash "$VPSGA_TEST_FAIL2BAN_BIN" status)" || return
+  else
+    status="$(fail2ban-client status)" || return
+  fi
+  grep -q 'Jail list:.*sshd' <<<"$status"
+}
+
 hardening_require_safe_directory() {
   local path="$1" mode
   [[ -d "$path" && ! -L "$path" ]] || {
@@ -548,6 +801,25 @@ hardening_after_rollback() {
     HARD-1005|HARD-1006|HARD-1007|HARD-2001|HARD-2002)
       hardening_sshd_test && hardening_ssh_reload
       ;;
+    HARD-2003|HARD-2004)
+      if [[ "$(cat "$HARDENING_TX_DIR/ufw-before" 2>/dev/null)" == inactive ]]; then
+        hardening_ufw_command --force disable
+      else
+        hardening_ufw_command reload
+      fi
+      ;;
+    HARD-2005)
+      if grep -q '^active=1$' "$HARDENING_TX_DIR/fail2ban-before" 2>/dev/null; then
+        hardening_systemctl_command restart fail2ban
+      else
+        hardening_systemctl_command stop fail2ban
+      fi
+      if grep -q '^enabled=1$' "$HARDENING_TX_DIR/fail2ban-before" 2>/dev/null; then
+        hardening_systemctl_command enable fail2ban
+      else
+        hardening_systemctl_command disable fail2ban
+      fi
+      ;;
     HARD-1009)
       hardening_sysctl_restore_runtime
       ;;
@@ -569,6 +841,9 @@ run_hardening_action_body() {
     HARD-1010) hardening_action_1010 ;;
     HARD-2001) hardening_action_2001 ;;
     HARD-2002) hardening_action_2002 ;;
+    HARD-2003) hardening_action_2003 ;;
+    HARD-2004) hardening_action_2004 ;;
+    HARD-2005) hardening_action_2005 ;;
     *) echo "该项目尚未开放自动执行：$1" >&2; return 78 ;;
   esac
 }
@@ -587,6 +862,9 @@ validate_hardening_action() {
     HARD-1010) hardening_validate_1010 ;;
     HARD-2001) hardening_validate_2001 ;;
     HARD-2002) hardening_validate_2002 ;;
+    HARD-2003) hardening_validate_2003 ;;
+    HARD-2004) hardening_validate_2004 ;;
+    HARD-2005) hardening_validate_2005 ;;
     *) return 78 ;;
   esac
 }
@@ -635,7 +913,9 @@ execute_hardening_action() {
 
 stage_sensitive_hardening_action() {
   local action="$1" token="$2" rc=0 tx_id
-  [[ "$action" == HARD-2001 || "$action" == HARD-2002 ]] || return 78
+  [[ "$action" =~ ^HARD-200[1-5]$ ]] || return 78
+  # 软件包安装不改变连接策略，并可能耗时较长；必须在5分钟网络回滚计时器启动前完成。
+  hardening_sensitive_preflight "$action" || return
   hardening_tx_begin "$action" || return
   tx_id="$HARDENING_TX_ID"
 

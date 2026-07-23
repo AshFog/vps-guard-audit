@@ -152,11 +152,11 @@ print_hardening_plan() {
     for i in "${APPLICABLE_SENSITIVE[@]}"; do print_hardening_action "$i" "$n"; n=$((n+1)); done
   fi
   echo
-  echo "HARD-1001 至 HARD-1010 可在确认后执行；HARD-2001 与 HARD-2002 还必须通过防失联和第二终端验证。"
+  echo "HARD-1001 至 HARD-1010 可在确认后执行；HARD-2001 至 HARD-2005 还必须通过防失联和第二终端验证。"
 }
 
 show_sensitive_hardening_menu() {
-  local answer i n admin console_ack token tx_id admins
+  local answer i n admin console_ack token tx_id admins action specs
   while true; do
     echo
     echo "⚠ 连接敏感加固"
@@ -181,10 +181,37 @@ show_sensitive_hardening_menu() {
       continue
     fi
     i="${APPLICABLE_SENSITIVE[$((answer-1))]}"
+    action="${HARDENING_IDS[$i]}"
     if [[ "${HARDENING_AUTOMATION[$i]}" != yes ]]; then
       echo "${HARDENING_IDS[$i]} 暂未开放自动执行，请查看详细说明。"
       continue
     fi
+
+    case "$action" in
+      HARD-2003)
+        hardening_firewall_plan || { echo "无法生成端口计划。" >&2; continue; }
+        echo "请输入确认需要公网放行的清单，例如：22/tcp 80/tcp 443/tcp"
+        printf '端口清单：'
+        IFS= read -r specs || return 0
+        if ! hardening_parse_ufw_specs "$specs" "$(connection_guard_current_context | cut -f4)" >/dev/null; then
+          echo "端口清单无效，已取消。" >&2
+          continue
+        fi
+        export VPSGA_UFW_ALLOW_SPECS="$specs"
+        ;;
+      HARD-2004)
+        echo "当前 UFW 编号规则："
+        hardening_ufw_command status numbered || { echo "无法读取 UFW 规则。" >&2; continue; }
+        echo "只输入已经逐条确认可删除的编号，例如：7 4 2"
+        printf '删除编号：'
+        IFS= read -r specs || return 0
+        if ! hardening_parse_ufw_delete_numbers "$specs" >/dev/null; then
+          echo "规则编号无效，已取消。" >&2
+          continue
+        fi
+        export VPSGA_UFW_DELETE_NUMBERS="$specs"
+        ;;
+    esac
 
     admins="$(connection_guard_list_admins || true)"
     if [[ -z "$admins" ]]; then
@@ -211,11 +238,16 @@ show_sensitive_hardening_menu() {
     IFS= read -r answer || return 0
     [[ "$answer" == APPLY ]] || { echo "已取消。"; continue; }
 
+    # 安装官方依赖可能耗时；先在用户确认后完成，再创建10分钟令牌和5分钟回滚 timer。
+    if ! hardening_sensitive_preflight "$action"; then
+      echo "连接敏感加固的依赖或冲突检查失败，尚未修改连接策略。" >&2
+      continue
+    fi
     token="$(connection_guard_start "$admin" "$console_ack")" || {
       echo "防失联前置检查失败，未修改 SSH。" >&2
       continue
     }
-    if ! stage_sensitive_hardening_action "${HARDENING_IDS[$i]}" "$token"; then
+    if ! stage_sensitive_hardening_action "$action" "$token"; then
       echo "连接敏感加固未能进入确认阶段。" >&2
       continue
     fi
