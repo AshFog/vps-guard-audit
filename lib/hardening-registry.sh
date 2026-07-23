@@ -28,15 +28,15 @@ hardening_registry_visit() {
     "low" "ssh.x11" "/etc/ssh/sshd_config.d/90-vpsga-hardening.conf" "yes" "HARD-1007"
   register_hardening_action "HARD-1008" "regular" "启用自动安全更新" \
     "安装并配置 unattended-upgrades，只自动应用安全更新。" \
-    "low" "pkg.unattended" "/etc/apt/apt.conf.d/20auto-upgrades" "planned" "HARD-1008"
+    "low" "pkg.unattended,pkg.unattended.config" "/etc/apt/apt.conf.d/52-vpsga-auto-upgrades" "yes" "HARD-1008"
   register_hardening_action "HARD-1009" "regular" "应用兼容性高的内核与网络参数" \
     "处理地址随机化、链接保护、源路由和重定向等通用参数，不改 IP 转发或禁用 IPv6。" \
     "low" "sysctl.kernel.randomize_va_space,sysctl.kernel.kptr_restrict,sysctl.kernel.yama.ptrace_scope,sysctl.fs.protected_hardlinks,sysctl.fs.protected_symlinks,sysctl.net.ipv4.tcp_syncookies,sysctl.net.ipv4.conf.*.accept_redirects,sysctl.net.ipv4.conf.*.send_redirects,sysctl.net.ipv4.conf.*.accept_source_route,sysctl.net.ipv4.icmp_echo_ignore_broadcasts,sysctl.net.ipv4.conf.all.log_martians,sysctl.net.ipv6.conf.*.accept_redirects" \
-    "/etc/sysctl.d/90-vpsga-hardening.conf" "planned" "HARD-1009"
+    "/etc/sysctl.d/90-vpsga-hardening.conf" "yes" "HARD-1009"
   register_hardening_action "HARD-1010" "regular" "限制 Core Dump" \
     "限制服务和普通进程生成包含内存敏感信息的核心转储。" \
     "low" "coredump.enabled,coredump.unlimited" \
-    "/etc/security/limits.d/90-vpsga-hardening.conf /etc/systemd/coredump.conf.d/90-vpsga.conf" "planned" "HARD-1010"
+    "/etc/security/limits.d/90-vpsga-hardening.conf /etc/systemd/coredump.conf.d/90-vpsga.conf" "yes" "HARD-1010"
 
   register_hardening_action "HARD-2001" "sensitive" "禁止 root 直接通过 SSH 登录" \
     "没有已验证的 sudo 管理用户时，执行后可能无法再次登录。" \

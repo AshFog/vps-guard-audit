@@ -1,5 +1,14 @@
 # Changelog
 
+## 6.0.0-dev.3
+
+- 开放 `HARD-1008` 至 `HARD-1010`：自动安全更新、兼容性较高的 sysctl 基线和 Core Dump 限制。
+- 自动安全更新使用独立 APT 配置片段，不覆盖 Ubuntu/Debian 官方软件包维护的安全来源策略。
+- 审计现在同时确认 unattended-upgrades 是否安装、是否启用周期更新，避免“已安装但未运行”的假闭环。
+- sysctl 动作只处理当前内核实际存在的参数，不修改 IP 转发，不禁用 IPv6；部分应用失败时恢复原运行时值。
+- Core Dump 动作同时限制普通用户与 systemd-coredump，并支持对新建配置目录进行安全回滚。
+- 增加 APT、sysctl 和 Core Dump 的隔离事务及故障注入测试。
+
 ## 6.0.0-dev.2
 
 - 开放 `HARD-1005` 至 `HARD-1007`：禁止 SSH 空密码、限制认证尝试次数、关闭 X11 转发。

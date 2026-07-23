@@ -50,7 +50,7 @@ finding_plain_text_zh() {
     pkg.dpkg|pkg.index|pkg.index.age|pkg.security_source|pkg.held)
       PLAIN_MEANING="软件包管理器、索引或更新源需要检查，当前更新判断可能不完整。"
       PLAIN_ACTION="查看本项技术细节，确认网络和官方软件源；不要同时运行多个 apt/dpkg 进程，也不要盲目解除全部 hold。" ;;
-    pkg.updates|pkg.unattended)
+    pkg.updates|pkg.unattended|pkg.unattended.config)
       PLAIN_MEANING="系统还有软件包或安全更新需要处理，自动安全更新也可能未配置。安全更新数量是根据当前 APT 信息估算的。"
       PLAIN_ACTION="先查看 apt list --upgradable，在有备份的维护时间运行 apt update 和 apt upgrade；先阅读计划，不要一开始就添加 -y。"
       PLAIN_CAUTION="升级可能重启服务；内核更新通常需要重启。" ;;

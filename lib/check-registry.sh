@@ -48,7 +48,7 @@ registry_lookup() {
     cron.mode) CHECK_ID="SYS-1102"; CHECK_CATEGORY="持久化" ;;
     pkg.updates) CHECK_ID="PKG-6001"; CHECK_CATEGORY="软件包"; CHECK_REQUIRED_COMMANDS="apt" ;;
     pkg.security_source) CHECK_ID="PKG-6002"; CHECK_CATEGORY="软件包"; CHECK_REQUIRED_COMMANDS="apt" ;;
-    pkg.unattended) CHECK_ID="PKG-6003"; CHECK_CATEGORY="软件包" ;;
+    pkg.unattended|pkg.unattended.config) CHECK_ID="PKG-6003"; CHECK_CATEGORY="软件包" ;;
     pkg.reboot|pkg.kernel_running) CHECK_ID="PKG-6004"; CHECK_CATEGORY="软件包" ;;
     pkg.dpkg|pkg.index|pkg.index.refresh|pkg.index.age|pkg.held) CHECK_ID="PKG-6005"; CHECK_CATEGORY="软件包"; CHECK_DEPTH="standard" ;;
     sysctl.*) CHECK_ID="SYS-1201"; CHECK_CATEGORY="内核"; CHECK_REQUIRED_COMMANDS="sysctl"; CHECK_DEPTH="standard" ;;

@@ -105,10 +105,16 @@ hardening_tx_restore_entry() {
       ;;
     missing)
       # 配置型动作可能在事务中创建新文件。回滚只删除普通文件，
-      # 对目录、设备或后来被替换成符号链接的目标一律拒绝处理。
+      # 新建目录仅在仍为空时删除；设备或后来被替换成符号链接的目标一律拒绝处理。
       if [[ -e "$path" || -L "$path" ]]; then
-        [[ -f "$path" && ! -L "$path" ]] || return 76
-        rm -f -- "$path" || return 74
+        [[ ! -L "$path" ]] || return 76
+        if [[ -f "$path" ]]; then
+          rm -f -- "$path" || return 74
+        elif [[ -d "$path" ]]; then
+          rmdir -- "$path" || return 74
+        else
+          return 76
+        fi
       fi
       ;;
     *) return 76 ;;

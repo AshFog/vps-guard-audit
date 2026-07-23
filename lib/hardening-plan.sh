@@ -152,7 +152,7 @@ print_hardening_plan() {
     for i in "${APPLICABLE_SENSITIVE[@]}"; do print_hardening_action "$i" "$n"; n=$((n+1)); done
   fi
   echo
-  echo "当前仅 HARD-1001 至 HARD-1007 开放确认后执行；其余项目仍只提供计划。"
+  echo "当前 HARD-1001 至 HARD-1010 均已开放确认后执行；连接敏感项目仍只提供计划。"
 }
 
 show_regular_hardening_menu() {

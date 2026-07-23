@@ -288,10 +288,245 @@ hardening_validate_1005() { hardening_ssh_validate_setting PermitEmptyPasswords 
 hardening_validate_1006() { hardening_ssh_validate_setting MaxAuthTries 4; }
 hardening_validate_1007() { hardening_ssh_validate_setting X11Forwarding no; }
 
+hardening_require_safe_directory() {
+  local path="$1" mode
+  [[ -d "$path" && ! -L "$path" ]] || {
+    echo "目标目录不存在或不安全：$path" >&2
+    return 69
+  }
+  mode="$(stat -c %a "$path")" || return 74
+  (( (8#$mode & 8#022) == 0 )) || {
+    echo "目标目录可被非 root 用户写入，拒绝修改：$path" >&2
+    return 76
+  }
+  [[ -n "${VPSGA_SYSTEM_ROOT:-}" || "$(stat -c %u "$path")" == 0 ]] || {
+    echo "目标目录不属于 root，拒绝修改：$path" >&2
+    return 76
+  }
+}
+
+hardening_write_managed_file() {
+  local path="$1" content="$2" marker="$3" dir tmp
+  dir="${path%/*}"
+  hardening_require_safe_directory "$dir" || return
+  if [[ -e "$path" || -L "$path" ]]; then
+    [[ -f "$path" && ! -L "$path" ]] || {
+      echo "拒绝覆盖非普通文件或符号链接：$path" >&2
+      return 76
+    }
+    grep -Fqx "$marker" "$path" || {
+      echo "目标文件并非由 VPS Guard Audit 管理，拒绝覆盖：$path" >&2
+      return 76
+    }
+  fi
+  hardening_tx_capture "$path" || return
+  tmp="$(mktemp "$dir/.vpsga-managed.XXXXXX")" || return 73
+  printf '%s' "$content" >"$tmp" || { rm -f -- "$tmp"; return 73; }
+  chmod 0600 -- "$tmp" || { rm -f -- "$tmp"; return 73; }
+  if [[ -z "${VPSGA_SYSTEM_ROOT:-}" ]]; then
+    chown root:root -- "$tmp" || { rm -f -- "$tmp"; return 73; }
+  fi
+  mv -f -- "$tmp" "$path" || { rm -f -- "$tmp"; return 73; }
+}
+
+hardening_ensure_managed_directory() {
+  local path="$1" parent
+  if [[ -e "$path" || -L "$path" ]]; then
+    hardening_require_safe_directory "$path"
+    return
+  fi
+  parent="${path%/*}"
+  hardening_require_safe_directory "$parent" || return
+  hardening_tx_capture "$path" || return
+  mkdir -- "$path" || return 73
+  chmod 0755 -- "$path" || return 73
+  if [[ -z "${VPSGA_SYSTEM_ROOT:-}" ]]; then
+    chown root:root -- "$path" || return 73
+  fi
+}
+
+hardening_apt_config_path() {
+  hardening_system_path /etc/apt/apt.conf.d/52-vpsga-auto-upgrades
+}
+
+hardening_apt_package_installed() {
+  if [[ -n "${VPSGA_SYSTEM_ROOT:-}" ]]; then
+    [[ -n "${VPSGA_TEST_DPKG_QUERY_BIN:-}" ]] || return 69
+    "$VPSGA_TEST_DPKG_QUERY_BIN" unattended-upgrades
+  else
+    dpkg-query -W -f='${Status}' unattended-upgrades 2>/dev/null | grep -q 'ok installed'
+  fi
+}
+
+hardening_apt_install_unattended() {
+  hardening_apt_package_installed && return 0
+  if [[ -n "${VPSGA_SYSTEM_ROOT:-}" ]]; then
+    [[ -n "${VPSGA_TEST_APT_GET_BIN:-}" ]] || return 69
+    "$VPSGA_TEST_APT_GET_BIN" install -y unattended-upgrades
+  else
+    command -v apt-get >/dev/null 2>&1 || return 69
+    DEBIAN_FRONTEND=noninteractive apt-get install -y unattended-upgrades
+  fi
+  hardening_apt_package_installed
+}
+
+hardening_action_1008() {
+  local path content marker='# Managed by VPS Guard Audit. Local edits may be replaced.'
+  path="$(hardening_apt_config_path)"
+  hardening_require_safe_directory "$(hardening_system_path /etc/apt/apt.conf.d)" || return
+  hardening_apt_install_unattended || return
+  content="$marker
+// The distribution package keeps the allowed security origins in 50unattended-upgrades.
+APT::Periodic::Update-Package-Lists \"1\";
+APT::Periodic::Unattended-Upgrade \"1\";
+"
+  hardening_write_managed_file "$path" "$content" "$marker"
+}
+
+hardening_validate_1008() {
+  local path
+  path="$(hardening_apt_config_path)"
+  hardening_apt_package_installed || return
+  [[ -f "$path" && ! -L "$path" && "$(stat -c %a "$path")" == 600 ]] || return 1
+  [[ -n "${VPSGA_SYSTEM_ROOT:-}" || "$(stat -c '%u:%g' "$path")" == '0:0' ]] || return 1
+  [[ "$(grep -Ec '^[[:space:]]*APT::Periodic::Update-Package-Lists[[:space:]]+\"1\";' "$path")" == 1 ]] || return 1
+  [[ "$(grep -Ec '^[[:space:]]*APT::Periodic::Unattended-Upgrade[[:space:]]+\"1\";' "$path")" == 1 ]]
+}
+
+hardening_sysctl_path() {
+  hardening_system_path /etc/sysctl.d/90-vpsga-hardening.conf
+}
+
+hardening_sysctl_command() {
+  if [[ -n "${VPSGA_SYSTEM_ROOT:-}" ]]; then
+    [[ -n "${VPSGA_TEST_SYSCTL_BIN:-}" ]] || return 69
+    "$VPSGA_TEST_SYSCTL_BIN" "$@"
+  else
+    command sysctl "$@"
+  fi
+}
+
+hardening_sysctl_pairs() {
+  cat <<'EOF'
+kernel.randomize_va_space=2
+kernel.kptr_restrict=1
+kernel.yama.ptrace_scope=1
+fs.protected_hardlinks=1
+fs.protected_symlinks=1
+net.ipv4.tcp_syncookies=1
+net.ipv4.conf.all.accept_redirects=0
+net.ipv4.conf.default.accept_redirects=0
+net.ipv4.conf.all.send_redirects=0
+net.ipv4.conf.default.send_redirects=0
+net.ipv4.conf.all.accept_source_route=0
+net.ipv4.conf.default.accept_source_route=0
+net.ipv4.icmp_echo_ignore_broadcasts=1
+net.ipv4.conf.all.log_martians=1
+net.ipv6.conf.all.accept_redirects=0
+net.ipv6.conf.default.accept_redirects=0
+EOF
+}
+
+hardening_sysctl_capture_runtime() {
+  local key value snapshot="$HARDENING_TX_DIR/sysctl-before.tsv"
+  : >"$snapshot" || return 73
+  while IFS='=' read -r key _; do
+    if ! value="$(hardening_sysctl_command -n "$key" 2>/dev/null)"; then
+      echo "跳过当前内核不存在的参数：$key" >&2
+      continue
+    fi
+    [[ "$value" =~ ^-?[0-9]+$ ]] || {
+      echo "内核参数返回了无法安全保存的值，拒绝修改：$key" >&2
+      return 76
+    }
+    printf '%s\t%s\n' "$key" "$value" >>"$snapshot"
+  done < <(hardening_sysctl_pairs)
+  chmod 0600 -- "$snapshot"
+}
+
+hardening_sysctl_apply_file() {
+  hardening_sysctl_command -p "$(hardening_sysctl_path)" >/dev/null
+}
+
+hardening_sysctl_restore_runtime() {
+  local key value snapshot="$HARDENING_TX_DIR/sysctl-before.tsv" failed=0
+  [[ -f "$snapshot" && ! -L "$snapshot" ]] || return 74
+  while IFS=$'\t' read -r key value; do
+    [[ "$key" =~ ^[a-z0-9_.]+$ && "$value" =~ ^-?[0-9]+$ ]] || return 76
+    hardening_sysctl_command -w "$key=$value" >/dev/null || failed=1
+  done <"$snapshot"
+  [[ "$failed" -eq 0 ]]
+}
+
+hardening_action_1009() {
+  local path content marker='# Managed by VPS Guard Audit. Local edits may be replaced.' key expected
+  path="$(hardening_sysctl_path)"
+  hardening_sysctl_capture_runtime || return
+  content="$marker
+# Does not change IP forwarding or disable IPv6.
+"
+  while IFS='=' read -r key expected; do
+    hardening_sysctl_command -n "$key" >/dev/null 2>&1 || continue
+    content+="$key = $expected"$'\n'
+  done < <(hardening_sysctl_pairs)
+  hardening_write_managed_file "$path" "$content" "$marker" || return
+  hardening_sysctl_apply_file
+}
+
+hardening_validate_1009() {
+  local path key expected actual
+  path="$(hardening_sysctl_path)"
+  [[ -f "$path" && ! -L "$path" && "$(stat -c %a "$path")" == 600 ]] || return 1
+  [[ -n "${VPSGA_SYSTEM_ROOT:-}" || "$(stat -c '%u:%g' "$path")" == '0:0' ]] || return 1
+  while IFS='=' read -r key expected; do
+    actual="$(hardening_sysctl_command -n "$key" 2>/dev/null)" || continue
+    [[ "$(grep -Ec "^[[:space:]]*${key//./\\.}[[:space:]]*=[[:space:]]*$expected[[:space:]]*$" "$path")" == 1 ]] || return 1
+    [[ "$actual" == "$expected" ]] || return 1
+  done < <(hardening_sysctl_pairs)
+}
+
+hardening_core_limits_path() {
+  hardening_system_path /etc/security/limits.d/90-vpsga-hardening.conf
+}
+
+hardening_coredump_path() {
+  hardening_system_path /etc/systemd/coredump.conf.d/90-vpsga.conf
+}
+
+hardening_action_1010() {
+  local marker='# Managed by VPS Guard Audit. Local edits may be replaced.' limits coredump
+  limits="$marker
+* hard core 0
+"
+  coredump="$marker
+[Coredump]
+Storage=none
+ProcessSizeMax=0
+"
+  hardening_ensure_managed_directory "$(hardening_system_path /etc/systemd/coredump.conf.d)" || return
+  hardening_write_managed_file "$(hardening_core_limits_path)" "$limits" "$marker" || return
+  hardening_write_managed_file "$(hardening_coredump_path)" "$coredump" "$marker"
+}
+
+hardening_validate_1010() {
+  local limits coredump path
+  limits="$(hardening_core_limits_path)"; coredump="$(hardening_coredump_path)"
+  for path in "$limits" "$coredump"; do
+    [[ -f "$path" && ! -L "$path" && "$(stat -c %a "$path")" == 600 ]] || return 1
+    [[ -n "${VPSGA_SYSTEM_ROOT:-}" || "$(stat -c '%u:%g' "$path")" == '0:0' ]] || return 1
+  done
+  [[ "$(grep -Ec '^[[:space:]]*\*[[:space:]]+hard[[:space:]]+core[[:space:]]+0([[:space:]]|$)' "$limits")" == 1 ]] || return 1
+  [[ "$(grep -Eic '^[[:space:]]*Storage[[:space:]]*=[[:space:]]*none[[:space:]]*$' "$coredump")" == 1 ]] || return 1
+  [[ "$(grep -Eic '^[[:space:]]*ProcessSizeMax[[:space:]]*=[[:space:]]*0[[:space:]]*$' "$coredump")" == 1 ]]
+}
+
 hardening_after_rollback() {
   case "$1" in
     HARD-1005|HARD-1006|HARD-1007)
       hardening_sshd_test && hardening_ssh_reload
+      ;;
+    HARD-1009)
+      hardening_sysctl_restore_runtime
       ;;
     *) return 0 ;;
   esac
@@ -306,6 +541,9 @@ run_hardening_action_body() {
     HARD-1005) hardening_action_1005 ;;
     HARD-1006) hardening_action_1006 ;;
     HARD-1007) hardening_action_1007 ;;
+    HARD-1008) hardening_action_1008 ;;
+    HARD-1009) hardening_action_1009 ;;
+    HARD-1010) hardening_action_1010 ;;
     *) echo "该项目尚未开放自动执行：$1" >&2; return 78 ;;
   esac
 }
@@ -319,6 +557,9 @@ validate_hardening_action() {
     HARD-1005) hardening_validate_1005 ;;
     HARD-1006) hardening_validate_1006 ;;
     HARD-1007) hardening_validate_1007 ;;
+    HARD-1008) hardening_validate_1008 ;;
+    HARD-1009) hardening_validate_1009 ;;
+    HARD-1010) hardening_validate_1010 ;;
     *) return 78 ;;
   esac
 }

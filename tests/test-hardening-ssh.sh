@@ -31,7 +31,8 @@ fi
 hardening_tx_close
 
 execute_hardening_action HARD-1005 >/dev/null
-tx_1005="$(find "$state" -mindepth 1 -maxdepth 1 -type d -name '*-HARD-1005-*' -printf '%f\n' | sort | tail -1)"
+tx_1005="$(find "$state" -mindepth 2 -maxdepth 2 -type f -path '*-HARD-1005-*/status' -exec grep -l '^status=committed$' {} + \
+  | sed 's#/status$##; s#^.*/##' | head -n1)"
 execute_hardening_action HARD-1006 >/dev/null
 execute_hardening_action HARD-1007 >/dev/null
 grep -qx 'PermitEmptyPasswords no' "$managed"

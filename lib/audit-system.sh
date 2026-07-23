@@ -78,10 +78,21 @@ audit_system() {
       else
         record PASS pkg.kernel_running "当前运行内核与最新安装版本一致" "Running kernel matches the newest installed version" "$running_kernel"
       fi
-      dpkg-query -W -f='${Status}' unattended-upgrades 2>/dev/null | grep -q 'ok installed' \
-        && record PASS pkg.unattended "已安装 unattended-upgrades" "unattended-upgrades is installed" \
-        || record WARN pkg.unattended "未安装 unattended-upgrades" "unattended-upgrades is not installed" "" \
+      if dpkg-query -W -f='${Status}' unattended-upgrades 2>/dev/null | grep -q 'ok installed'; then
+        record PASS pkg.unattended "已安装 unattended-upgrades" "unattended-upgrades is installed"
+        unattended_config="$(apt-config dump 2>/dev/null || true)"
+        unattended_lists="$(awk '$1 == "APT::Periodic::Update-Package-Lists" {gsub(/[\";]/, "", $2); value=$2} END {print value}' <<<"$unattended_config")"
+        unattended_run="$(awk '$1 == "APT::Periodic::Unattended-Upgrade" {gsub(/[\";]/, "", $2); value=$2} END {print value}' <<<"$unattended_config")"
+        if [[ "$unattended_lists" == 1 && "$unattended_run" == 1 ]]; then
+          record PASS pkg.unattended.config "自动安全更新已启用" "Automatic security updates are enabled"
+        else
+          record WARN pkg.unattended.config "unattended-upgrades 已安装但未确认自动运行" "unattended-upgrades is installed but automatic runs were not confirmed" \
+            "Update-Package-Lists=${unattended_lists:-未设置}; Unattended-Upgrade=${unattended_run:-未设置}"
+        fi
+      else
+        record WARN pkg.unattended "未安装 unattended-upgrades" "unattended-upgrades is not installed" "" \
           "建议安装并启用 unattended-upgrades 自动安装安全更新。" "Install and enable unattended-upgrades for automatic security fixes."
+      fi
     elif [[ "$CHECK_UPDATES" -eq 0 ]]; then
       record SKIP pkg.updates "已跳过软件更新检查" "Package update check skipped"
     else
