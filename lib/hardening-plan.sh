@@ -152,7 +152,89 @@ print_hardening_plan() {
     for i in "${APPLICABLE_SENSITIVE[@]}"; do print_hardening_action "$i" "$n"; n=$((n+1)); done
   fi
   echo
-  echo "当前 HARD-1001 至 HARD-1010 均已开放确认后执行；连接敏感项目仍只提供计划。"
+  echo "HARD-1001 至 HARD-1010 可在确认后执行；HARD-2001 与 HARD-2002 还必须通过防失联和第二终端验证。"
+}
+
+show_sensitive_hardening_menu() {
+  local answer i n admin console_ack token tx_id admins
+  while true; do
+    echo
+    echo "⚠ 连接敏感加固"
+    echo "以下设置可能导致 SSH 无法重新连接。请保留当前窗口，并先打开 VPS 控制台。"
+    n=1
+    if ((${#APPLICABLE_SENSITIVE[@]} == 0)); then
+      echo "  暂无匹配项目。"
+      return 0
+    fi
+    for i in "${APPLICABLE_SENSITIVE[@]}"; do
+      print_hardening_action "$i" "$n"
+      n=$((n+1))
+    done
+    echo
+    echo "输入编号可处理已开放项目；每次只能执行一项。"
+    echo "  0. 返回"
+    printf '请选择：'
+    IFS= read -r answer || return 0
+    [[ "$answer" == 0 ]] && return 0
+    if [[ ! "$answer" =~ ^[0-9]+$ ]] || ((answer < 1 || answer > ${#APPLICABLE_SENSITIVE[@]})); then
+      echo "无效选项，请重新输入。"
+      continue
+    fi
+    i="${APPLICABLE_SENSITIVE[$((answer-1))]}"
+    if [[ "${HARDENING_AUTOMATION[$i]}" != yes ]]; then
+      echo "${HARDENING_IDS[$i]} 暂未开放自动执行，请查看详细说明。"
+      continue
+    fi
+
+    admins="$(connection_guard_list_admins || true)"
+    if [[ -z "$admins" ]]; then
+      echo "没有找到具备安全公钥的非 root sudo/admin 备用管理员，拒绝执行。" >&2
+      continue
+    fi
+    echo "可用于第二终端验证的备用管理员："
+    sed 's/^/  - /' <<<"$admins"
+    printf '请输入要用于第二终端的管理员用户名：'
+    IFS= read -r admin || return 0
+    if ! grep -Fqx -- "$admin" <<<"$admins"; then
+      echo "该用户未通过备用管理员检查。" >&2
+      continue
+    fi
+    printf '确认 VPS 网页控制台、VNC 或救援模式可用，请输入 CONSOLE READY：'
+    IFS= read -r console_ack || return 0
+    if [[ "$console_ack" != "CONSOLE READY" ]]; then
+      echo "未确认控制台，已取消。"
+      continue
+    fi
+    echo "即将执行：${HARDENING_IDS[$i]} ${HARDENING_TITLES[$i]}"
+    echo "修改后若5分钟内未由第二 SSH 终端确认，工具将自动回滚。"
+    printf '输入 APPLY 确认执行：'
+    IFS= read -r answer || return 0
+    [[ "$answer" == APPLY ]] || { echo "已取消。"; continue; }
+
+    token="$(connection_guard_start "$admin" "$console_ack")" || {
+      echo "防失联前置检查失败，未修改 SSH。" >&2
+      continue
+    }
+    if ! stage_sensitive_hardening_action "${HARDENING_IDS[$i]}" "$token"; then
+      echo "连接敏感加固未能进入确认阶段。" >&2
+      continue
+    fi
+    tx_id="$HARDENING_TX_ID"
+    echo
+    echo "配置已临时应用，当前窗口不要关闭。"
+    echo "请以 $admin 打开第二个 SSH 连接，并运行："
+    echo "  sudo vpsga connection-confirm $token"
+    echo "第二终端显示验证成功后，回到这里输入 CONFIRM。"
+    printf '输入 CONFIRM 提交，其他输入将保留自动回滚：'
+    IFS= read -r answer || answer=""
+    if [[ "$answer" == CONFIRM ]] && connection_guard_finalize_transaction "$tx_id" "$token"; then
+      echo "[${HARDENING_IDS[$i]}] 第二终端验证成功，事务已提交：$tx_id"
+    else
+      echo "尚未完成第二终端验证。请保持当前 SSH 连接；延时任务会恢复配置。" >&2
+    fi
+    hardening_tx_close
+    collect_applicable_hardening
+  done
 }
 
 show_regular_hardening_menu() {
@@ -222,14 +304,7 @@ show_post_audit_menu() {
         show_regular_hardening_menu
         ;;
       2)
-        echo
-        echo "⚠ 连接敏感加固"
-        echo "以下设置可能导致 SSH 无法重新连接，请先准备 VPS 控制台或救援模式。"
-        if ((${#APPLICABLE_SENSITIVE[@]} == 0)); then echo "  暂无匹配项目。"; fi
-        local i n=1
-        for i in "${APPLICABLE_SENSITIVE[@]}"; do print_hardening_action "$i" "$n"; n=$((n+1)); done
-        echo
-        echo "当前连接敏感动作仍未开放。可先运行 vpsga connection-check 检查防失联条件。"
+        show_sensitive_hardening_menu
         ;;
       3) print_hardening_plan ;;
       4|0) return 0 ;;

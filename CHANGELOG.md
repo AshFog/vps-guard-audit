@@ -1,5 +1,15 @@
 # Changelog
 
+## 6.0.0-dev.5
+
+- 开放 `HARD-2001`：设置 `PermitRootLogin no`，禁止 root 直接通过 SSH 登录。
+- 开放 `HARD-2002`：同时关闭 `PasswordAuthentication` 与 `KbdInteractiveAuthentication`。
+- 两项动作均强制经过控制台确认、备用 sudo 管理员检查、5分钟 systemd 延时回滚和第二 SSH 会话确认。
+- SSH 写入后使用 `sshd -t` 检查语法，并使用 `sshd -T` 检查最终生效值；配置冲突或 reload 失败会立即恢复。
+- 普通常规动作执行器明确拒绝 `HARD-2xxx`，避免敏感动作绕过防失联流程。
+- 修正全局 `vpsga` 包装器的管理命令分发，确保第二终端确认与 systemd 自动回滚在安装后真正可用。
+- 新增敏感 SSH 隔离测试，覆盖确认提交、确认超时恢复和 reload 故障回滚。
+
 ## 6.0.0-dev.4
 
 - 新增连接敏感加固的统一防失联模块，真实识别当前 SSH 客户端、服务器地址与端口。

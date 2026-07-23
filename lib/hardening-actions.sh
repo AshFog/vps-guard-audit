@@ -227,7 +227,9 @@ hardening_ssh_reload() {
 }
 
 hardening_ssh_write_setting() {
-  local key="$1" value="$2" managed tmp dir line first="" second="" third=""
+  local managed tmp dir line key value
+  local first="" second="" third="" fourth="" fifth="" sixth=""
+  (($# >= 2 && $# % 2 == 0)) || return 64
   managed="$(hardening_ssh_managed_path)"
   dir="${managed%/*}"
   hardening_ssh_preflight || return
@@ -239,15 +241,24 @@ hardening_ssh_write_setting() {
         PermitEmptyPasswords) first="$line" ;;
         MaxAuthTries) second="$line" ;;
         X11Forwarding) third="$line" ;;
+        PermitRootLogin) fourth="$line" ;;
+        PasswordAuthentication) fifth="$line" ;;
+        KbdInteractiveAuthentication) sixth="$line" ;;
       esac
     done <"$managed"
   fi
-  case "$key" in
-    PermitEmptyPasswords) first="$key $value" ;;
-    MaxAuthTries) second="$key $value" ;;
-    X11Forwarding) third="$key $value" ;;
-    *) return 64 ;;
-  esac
+  while (($#)); do
+    key="$1"; value="$2"; shift 2
+    case "$key" in
+      PermitEmptyPasswords) first="$key $value" ;;
+      MaxAuthTries) second="$key $value" ;;
+      X11Forwarding) third="$key $value" ;;
+      PermitRootLogin) fourth="$key $value" ;;
+      PasswordAuthentication) fifth="$key $value" ;;
+      KbdInteractiveAuthentication) sixth="$key $value" ;;
+      *) return 64 ;;
+    esac
+  done
 
   tmp="$(mktemp "$dir/.90-vpsga-hardening.conf.XXXXXX")" || return 73
   {
@@ -256,6 +267,9 @@ hardening_ssh_write_setting() {
     [[ -z "$first" ]] || echo "$first"
     [[ -z "$second" ]] || echo "$second"
     [[ -z "$third" ]] || echo "$third"
+    [[ -z "$fourth" ]] || echo "$fourth"
+    [[ -z "$fifth" ]] || echo "$fifth"
+    [[ -z "$sixth" ]] || echo "$sixth"
   } >"$tmp" || { rm -f -- "$tmp"; return 73; }
   chmod 0600 -- "$tmp" || { rm -f -- "$tmp"; return 73; }
   if [[ -z "${VPSGA_SYSTEM_ROOT:-}" ]]; then
@@ -269,6 +283,10 @@ hardening_ssh_write_setting() {
 hardening_action_1005() { hardening_ssh_write_setting PermitEmptyPasswords no; }
 hardening_action_1006() { hardening_ssh_write_setting MaxAuthTries 4; }
 hardening_action_1007() { hardening_ssh_write_setting X11Forwarding no; }
+hardening_action_2001() { hardening_ssh_write_setting PermitRootLogin no; }
+hardening_action_2002() {
+  hardening_ssh_write_setting PasswordAuthentication no KbdInteractiveAuthentication no
+}
 
 hardening_ssh_validate_setting() {
   local key="$1" value="$2" managed
@@ -287,6 +305,11 @@ hardening_ssh_validate_setting() {
 hardening_validate_1005() { hardening_ssh_validate_setting PermitEmptyPasswords no; }
 hardening_validate_1006() { hardening_ssh_validate_setting MaxAuthTries 4; }
 hardening_validate_1007() { hardening_ssh_validate_setting X11Forwarding no; }
+hardening_validate_2001() { hardening_ssh_validate_setting PermitRootLogin no; }
+hardening_validate_2002() {
+  hardening_ssh_validate_setting PasswordAuthentication no &&
+    hardening_ssh_validate_setting KbdInteractiveAuthentication no
+}
 
 hardening_require_safe_directory() {
   local path="$1" mode
@@ -522,7 +545,7 @@ hardening_validate_1010() {
 
 hardening_after_rollback() {
   case "$1" in
-    HARD-1005|HARD-1006|HARD-1007)
+    HARD-1005|HARD-1006|HARD-1007|HARD-2001|HARD-2002)
       hardening_sshd_test && hardening_ssh_reload
       ;;
     HARD-1009)
@@ -544,6 +567,8 @@ run_hardening_action_body() {
     HARD-1008) hardening_action_1008 ;;
     HARD-1009) hardening_action_1009 ;;
     HARD-1010) hardening_action_1010 ;;
+    HARD-2001) hardening_action_2001 ;;
+    HARD-2002) hardening_action_2002 ;;
     *) echo "该项目尚未开放自动执行：$1" >&2; return 78 ;;
   esac
 }
@@ -560,12 +585,18 @@ validate_hardening_action() {
     HARD-1008) hardening_validate_1008 ;;
     HARD-1009) hardening_validate_1009 ;;
     HARD-1010) hardening_validate_1010 ;;
+    HARD-2001) hardening_validate_2001 ;;
+    HARD-2002) hardening_validate_2002 ;;
     *) return 78 ;;
   esac
 }
 
 execute_hardening_action() {
   local action="$1" rc=0 tx_id
+  [[ "$action" =~ ^HARD-1[0-9]{3}$ ]] || {
+    echo "连接敏感动作必须使用防失联执行流程：$action" >&2
+    return 78
+  }
   hardening_tx_begin "$action" || return
   tx_id="$HARDENING_TX_ID"
   if run_hardening_action_body "$action"; then
@@ -600,4 +631,55 @@ execute_hardening_action() {
   fi
   echo "[$action] 已完成并通过验证。事务：$tx_id"
   hardening_tx_close
+}
+
+stage_sensitive_hardening_action() {
+  local action="$1" token="$2" rc=0 tx_id
+  [[ "$action" == HARD-2001 || "$action" == HARD-2002 ]] || return 78
+  hardening_tx_begin "$action" || return
+  tx_id="$HARDENING_TX_ID"
+
+  # Timer is armed before SSH is changed. It only becomes eligible to restore
+  # after the transaction reaches pending_confirmation.
+  if connection_guard_arm_rollback "$tx_id" 300; then
+    :
+  else
+    rc=$?
+    hardening_tx_rollback "无法建立延时自动回滚" >/dev/null 2>&1 || true
+    hardening_tx_close
+    return "$rc"
+  fi
+  if run_hardening_action_body "$action"; then
+    :
+  else
+    rc=$?
+    hardening_tx_rollback "连接敏感动作执行失败" || rc=74
+    [[ ! -s "$HARDENING_TX_MANIFEST" ]] || hardening_after_rollback "$action" || rc=74
+    connection_guard_cancel_rollback "$tx_id" >/dev/null 2>&1 || true
+    echo "[$action] 执行失败，已尝试自动回滚。事务：$tx_id" >&2
+    hardening_tx_close
+    return "$rc"
+  fi
+  if validate_hardening_action "$action"; then
+    :
+  else
+    rc=$?
+    hardening_tx_rollback "连接敏感修改验证失败" || rc=74
+    [[ ! -s "$HARDENING_TX_MANIFEST" ]] || hardening_after_rollback "$action" || rc=74
+    connection_guard_cancel_rollback "$tx_id" >/dev/null 2>&1 || true
+    echo "[$action] 验证失败，已尝试自动回滚。事务：$tx_id" >&2
+    hardening_tx_close
+    return "$rc"
+  fi
+  if hardening_tx_mark_pending_confirmation && connection_guard_bind_transaction "$token" "$tx_id"; then
+    :
+  else
+    rc=$?
+    hardening_tx_rollback "无法绑定第二终端确认" || rc=74
+    hardening_after_rollback "$action" || rc=74
+    connection_guard_cancel_rollback "$tx_id" >/dev/null 2>&1 || true
+    echo "[$action] 无法进入第二终端确认，已尝试自动回滚。事务：$tx_id" >&2
+    hardening_tx_close
+    return "$rc"
+  fi
 }

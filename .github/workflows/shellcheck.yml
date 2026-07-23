@@ -22,7 +22,7 @@ jobs:
 
       - name: 中文定位和版本
         run: |
-          test "$(bash ./vps-guard-audit.sh --version)" = "6.0.0-dev.1"
+          test "$(bash ./vps-guard-audit.sh --version)" = "6.0.0-dev.5"
           help_output="$(bash ./vps-guard-audit.sh --help)"
           grep -q '用法' <<<"$help_output"
           grep -q -- '--depth quick|standard|deep' <<<"$help_output"
@@ -39,7 +39,7 @@ jobs:
           set -e
           test "$rc" -ge 0 -a "$rc" -le 2
           report="$(find "$RUNNER_TEMP/json" -maxdepth 1 -name 'vpsga-*.json' -print -quit)"
-          jq -e '.version == "6.0.0-dev.1" and .schema_version == "2.0" and .language == "zh-CN" and .depth == "quick" and (.findings | type == "array") and (.findings[0].test_id | test("^[A-Z]+-[0-9]{4}$")) and (.findings[0].evidence | type == "array")' "$report"
+          jq -e '.version == "6.0.0-dev.5" and .schema_version == "2.0" and .language == "zh-CN" and .depth == "quick" and (.findings | type == "array") and (.findings[0].test_id | test("^[A-Z]+-[0-9]{4}$")) and (.findings[0].evidence | type == "array")' "$report"
 
       - name: 18 项加固注册表与只读计划
         run: |
@@ -53,7 +53,7 @@ jobs:
           set -e
           test "$rc" -ge 0 -a "$rc" -le 2
           grep -q '中文加固计划（只读预览）' "$RUNNER_TEMP/plan.txt"
-          grep -q '当前仅 HARD-1001 至 HARD-1004' "$RUNNER_TEMP/plan.txt"
+          grep -q 'HARD-1001 至 HARD-1010' "$RUNNER_TEMP/plan.txt"
           bash -c '
             set -uo pipefail
             declare -a FINDING_LEGACY_IDS=(ssh.password ssh.tries fw.none pkg.unattended)
@@ -97,6 +97,13 @@ jobs:
             grep -q "status=rolled_back" "$HARDENING_TX_DIR/status"
           '
 
+      - name: SSH 与连接敏感加固故障测试
+        run: |
+          bash tests/test-hardening-ssh.sh
+          bash tests/test-hardening-system.sh
+          bash tests/test-connection-safety.sh
+          bash tests/test-hardening-sensitive-ssh.sh
+
       - name: 中文报告与历史比较
         run: |
           mkdir -p "$RUNNER_TEMP/reports" "$RUNNER_TEMP/history"
@@ -133,8 +140,18 @@ jobs:
           test -x /usr/local/bin/vpsga
           test -L /usr/local/lib/vps-guard-audit/current
           test -f /usr/local/lib/vps-guard-audit/current/MANIFEST.sha256
-          test "$(/usr/local/bin/vpsga --version)" = "6.0.0-dev.1"
+          test "$(/usr/local/bin/vpsga --version)" = "6.0.0-dev.5"
           /usr/local/bin/vpsga doctor
+          /usr/local/bin/vpsga connection-check >"$RUNNER_TEMP/connection-check.txt" 2>&1 || true
+          grep -q '连接敏感加固前置检查' "$RUNNER_TEMP/connection-check.txt"
+          set +e
+          /usr/local/bin/vpsga connection-confirm invalid-token >"$RUNNER_TEMP/connection-confirm.txt" 2>&1
+          confirm_rc=$?
+          set -e
+          test "$confirm_rc" -eq 65
+          grep -q '第二 SSH 连接验证失败' "$RUNNER_TEMP/connection-confirm.txt"
+          /usr/local/bin/vpsga rollback-auto invalid-transaction >"$RUNNER_TEMP/rollback-auto.txt" 2>&1
+          grep -q '自动回滚未执行' "$RUNNER_TEMP/rollback-auto.txt"
 
       - name: 旧 current 目录迁移
         run: |
@@ -145,7 +162,7 @@ jobs:
           sudo cp lib/*.sh /usr/local/lib/vps-guard-audit/current/lib/
           sudo bash ./install.sh
           test -L /usr/local/lib/vps-guard-audit/current
-          test "$(readlink -f /usr/local/lib/vps-guard-audit/current)" = "/usr/local/lib/vps-guard-audit/releases/6.0.0-dev.1"
+          test "$(readlink -f /usr/local/lib/vps-guard-audit/current)" = "/usr/local/lib/vps-guard-audit/releases/6.0.0-dev.5"
           /usr/local/bin/vpsga doctor
 
       - name: 非 root 运行与报告所有权

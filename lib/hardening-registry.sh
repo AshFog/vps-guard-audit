@@ -40,10 +40,10 @@ hardening_registry_visit() {
 
   register_hardening_action "HARD-2001" "sensitive" "禁止 root 直接通过 SSH 登录" \
     "没有已验证的 sudo 管理用户时，执行后可能无法再次登录。" \
-    "critical" "ssh.root" "/etc/ssh/sshd_config.d/90-vpsga-hardening.conf" "planned" "HARD-2001"
+    "critical" "ssh.root" "/etc/ssh/sshd_config.d/90-vpsga-hardening.conf" "yes" "HARD-2001"
   register_hardening_action "HARD-2002" "sensitive" "禁止 SSH 密码登录" \
     "密钥未实际验证或客户端丢失私钥时，执行后会失去 SSH 登录能力。" \
-    "critical" "ssh.password" "/etc/ssh/sshd_config.d/90-vpsga-hardening.conf" "planned" "HARD-2002"
+    "critical" "ssh.password" "/etc/ssh/sshd_config.d/90-vpsga-hardening.conf" "yes" "HARD-2002"
   register_hardening_action "HARD-2003" "sensitive" "启用 UFW 防火墙" \
     "必须先识别并放行当前 SSH、网站、面板、代理及容器所需端口。" \
     "critical" "fw.none,fw.ufw.absent" "/etc/ufw/*" "planned" "HARD-2003"
