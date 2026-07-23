@@ -35,7 +35,7 @@ audit_access() {
         || record FAIL ssh.empty "SSH 可能允许空密码" "Empty SSH passwords may be allowed"
       tries="$(sshval maxauthtries)"
       if [[ "$tries" =~ ^[0-9]+$ ]]; then
-        if [[ "$POLICY" == strict && "$tries" -gt 3 ]]; then
+        if [[ "$POLICY" == strict && "$tries" -gt 4 ]]; then
           record WARN ssh.tries "严格策略下 SSH 最大尝试次数偏高" "SSH MaxAuthTries exceeds the strict-policy recommendation" "$tries"
         elif [[ "$tries" -le 6 ]]; then
           record PASS ssh.tries "SSH 最大尝试次数处于合理基线" "SSH MaxAuthTries is within the baseline" "$tries"

@@ -121,12 +121,191 @@ hardening_validate_1004() {
     -xdev -type f -perm /022 -print -quit 2>/dev/null | grep -q .
 }
 
+hardening_ssh_managed_path() {
+  hardening_system_path /etc/ssh/sshd_config.d/90-vpsga-hardening.conf
+}
+
+hardening_ssh_main_config() {
+  hardening_system_path /etc/ssh/sshd_config
+}
+
+hardening_ssh_preflight() {
+  local main include_dir managed mode path
+  main="$(hardening_ssh_main_config)"
+  include_dir="$(hardening_system_path /etc/ssh/sshd_config.d)"
+  managed="$(hardening_ssh_managed_path)"
+  [[ -f "$main" && ! -L "$main" ]] || {
+    echo "未找到安全可用的 SSH 主配置：$main" >&2
+    return 69
+  }
+  [[ -d "$include_dir" && ! -L "$include_dir" ]] || {
+    echo "SSH drop-in 目录不存在或不安全：$include_dir" >&2
+    return 69
+  }
+  for path in "$main" "$include_dir"; do
+    mode="$(stat -c %a "$path")" || return 74
+    (( (8#$mode & 8#022) == 0 )) || {
+      echo "SSH 配置路径可被非 root 用户写入，拒绝修改：$path" >&2
+      return 76
+    }
+    [[ -n "${VPSGA_SYSTEM_ROOT:-}" || "$(stat -c %u "$path")" == 0 ]] || {
+      echo "SSH 配置路径不属于 root，拒绝修改：$path" >&2
+      return 76
+    }
+  done
+  if [[ -e "$managed" || -L "$managed" ]]; then
+    [[ -f "$managed" && ! -L "$managed" ]] || {
+      echo "拒绝覆盖非普通文件或符号链接：$managed" >&2
+      return 76
+    }
+    grep -qx '# Managed by VPS Guard Audit. Local edits may be replaced.' "$managed" || {
+      echo "目标文件并非由 VPS Guard Audit 管理，拒绝覆盖：$managed" >&2
+      return 76
+    }
+  fi
+  # Debian/Ubuntu 的 drop-in 必须由主配置显式 Include。忽略注释和大小写。
+  awk '
+    /^[[:space:]]*#/ { next }
+    tolower($1) == "include" {
+      for (i = 2; i <= NF; i++)
+        if ($i == "/etc/ssh/sshd_config.d/*.conf") found = 1
+    }
+    END { exit(found ? 0 : 1) }
+  ' "$main" || {
+    echo "SSH 主配置没有启用 /etc/ssh/sshd_config.d/*.conf，无法安全使用 drop-in。" >&2
+    return 78
+  }
+}
+
+hardening_sshd_test() {
+  local main
+  main="$(hardening_ssh_main_config)"
+  if [[ -n "${VPSGA_SYSTEM_ROOT:-}" ]]; then
+    [[ -n "${VPSGA_TEST_SSHD_BIN:-}" ]] || {
+      echo "隔离根目录测试必须设置 VPSGA_TEST_SSHD_BIN。" >&2
+      return 69
+    }
+    "$VPSGA_TEST_SSHD_BIN" -t -f "$main"
+  else
+    command -v sshd >/dev/null 2>&1 || {
+      echo "找不到 sshd，无法验证 SSH 配置。" >&2
+      return 69
+    }
+    sshd -t -f "$main"
+  fi
+}
+
+hardening_sshd_effective_value() {
+  local key="$1" main output
+  main="$(hardening_ssh_main_config)"
+  if [[ -n "${VPSGA_SYSTEM_ROOT:-}" ]]; then
+    [[ -n "${VPSGA_TEST_SSHD_BIN:-}" ]] || return 69
+    output="$("$VPSGA_TEST_SSHD_BIN" -T -f "$main")" || return
+  else
+    command -v sshd >/dev/null 2>&1 || return 69
+    output="$(sshd -T -f "$main")" || return
+  fi
+  awk -v key="${key,,}" '$1 == key { print $2; found=1; exit } END { if (!found) exit 1 }' <<<"$output"
+}
+
+hardening_ssh_reload() {
+  if [[ -n "${VPSGA_SYSTEM_ROOT:-}" ]]; then
+    if [[ -n "${VPSGA_TEST_SSH_RELOAD_BIN:-}" ]]; then
+      "$VPSGA_TEST_SSH_RELOAD_BIN" "$(hardening_ssh_main_config)"
+      return
+    fi
+    return 0
+  fi
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl reload ssh 2>/dev/null || systemctl reload sshd
+  elif command -v service >/dev/null 2>&1; then
+    service ssh reload 2>/dev/null || service sshd reload
+  else
+    echo "找不到可用的 SSH 服务重载方式。" >&2
+    return 69
+  fi
+}
+
+hardening_ssh_write_setting() {
+  local key="$1" value="$2" managed tmp dir line first="" second="" third=""
+  managed="$(hardening_ssh_managed_path)"
+  dir="${managed%/*}"
+  hardening_ssh_preflight || return
+  hardening_tx_capture "$managed" || return
+
+  if [[ -f "$managed" ]]; then
+    while IFS= read -r line; do
+      case "${line%%[[:space:]]*}" in
+        PermitEmptyPasswords) first="$line" ;;
+        MaxAuthTries) second="$line" ;;
+        X11Forwarding) third="$line" ;;
+      esac
+    done <"$managed"
+  fi
+  case "$key" in
+    PermitEmptyPasswords) first="$key $value" ;;
+    MaxAuthTries) second="$key $value" ;;
+    X11Forwarding) third="$key $value" ;;
+    *) return 64 ;;
+  esac
+
+  tmp="$(mktemp "$dir/.90-vpsga-hardening.conf.XXXXXX")" || return 73
+  {
+    echo '# Managed by VPS Guard Audit. Local edits may be replaced.'
+    echo '# Changes are backed up under /var/lib/vps-guard-audit/hardening.'
+    [[ -z "$first" ]] || echo "$first"
+    [[ -z "$second" ]] || echo "$second"
+    [[ -z "$third" ]] || echo "$third"
+  } >"$tmp" || { rm -f -- "$tmp"; return 73; }
+  chmod 0600 -- "$tmp" || { rm -f -- "$tmp"; return 73; }
+  if [[ -z "${VPSGA_SYSTEM_ROOT:-}" ]]; then
+    chown root:root -- "$tmp" || { rm -f -- "$tmp"; return 73; }
+  fi
+  mv -f -- "$tmp" "$managed" || { rm -f -- "$tmp"; return 73; }
+  hardening_sshd_test || return
+  hardening_ssh_reload
+}
+
+hardening_action_1005() { hardening_ssh_write_setting PermitEmptyPasswords no; }
+hardening_action_1006() { hardening_ssh_write_setting MaxAuthTries 4; }
+hardening_action_1007() { hardening_ssh_write_setting X11Forwarding no; }
+
+hardening_ssh_validate_setting() {
+  local key="$1" value="$2" managed
+  managed="$(hardening_ssh_managed_path)"
+  [[ -f "$managed" && ! -L "$managed" ]] || return 1
+  [[ "$(stat -c %a "$managed")" == 600 ]] || return 1
+  [[ -n "${VPSGA_SYSTEM_ROOT:-}" || "$(stat -c '%u:%g' "$managed")" == '0:0' ]] || return 1
+  [[ "$(awk -v key="$key" '
+    $1 == key { count++; result=$2 }
+    END { if (count == 1) print result; else exit 1 }
+  ' "$managed")" == "$value" ]] || return 1
+  hardening_sshd_test || return
+  [[ "$(hardening_sshd_effective_value "$key")" == "${value,,}" ]]
+}
+
+hardening_validate_1005() { hardening_ssh_validate_setting PermitEmptyPasswords no; }
+hardening_validate_1006() { hardening_ssh_validate_setting MaxAuthTries 4; }
+hardening_validate_1007() { hardening_ssh_validate_setting X11Forwarding no; }
+
+hardening_after_rollback() {
+  case "$1" in
+    HARD-1005|HARD-1006|HARD-1007)
+      hardening_sshd_test && hardening_ssh_reload
+      ;;
+    *) return 0 ;;
+  esac
+}
+
 run_hardening_action_body() {
   case "$1" in
     HARD-1001) hardening_action_1001 ;;
     HARD-1002) hardening_action_1002 ;;
     HARD-1003) hardening_action_1003 ;;
     HARD-1004) hardening_action_1004 ;;
+    HARD-1005) hardening_action_1005 ;;
+    HARD-1006) hardening_action_1006 ;;
+    HARD-1007) hardening_action_1007 ;;
     *) echo "该项目尚未开放自动执行：$1" >&2; return 78 ;;
   esac
 }
@@ -137,6 +316,9 @@ validate_hardening_action() {
     HARD-1002) hardening_validate_1002 ;;
     HARD-1003) hardening_validate_1003 ;;
     HARD-1004) hardening_validate_1004 ;;
+    HARD-1005) hardening_validate_1005 ;;
+    HARD-1006) hardening_validate_1006 ;;
+    HARD-1007) hardening_validate_1007 ;;
     *) return 78 ;;
   esac
 }
@@ -150,6 +332,7 @@ execute_hardening_action() {
   else
     rc=$?
     hardening_tx_rollback "动作执行失败" || rc=74
+    [[ ! -s "$HARDENING_TX_MANIFEST" ]] || hardening_after_rollback "$action" || rc=74
     echo "[$action] 执行失败，已尝试自动回滚。事务：$tx_id" >&2
     hardening_tx_close
     return "$rc"
@@ -159,11 +342,21 @@ execute_hardening_action() {
   else
     rc=$?
     hardening_tx_rollback "修改后验证失败" || rc=74
+    [[ ! -s "$HARDENING_TX_MANIFEST" ]] || hardening_after_rollback "$action" || rc=74
     echo "[$action] 验证失败，已自动回滚。事务：$tx_id" >&2
     hardening_tx_close
     return "$rc"
   fi
-  hardening_tx_commit || return
+  if hardening_tx_commit; then
+    :
+  else
+    rc=$?
+    hardening_tx_rollback "事务提交失败" || rc=74
+    [[ ! -s "$HARDENING_TX_MANIFEST" ]] || hardening_after_rollback "$action" || rc=74
+    echo "[$action] 无法提交事务，已尝试自动回滚。事务：$tx_id" >&2
+    hardening_tx_close
+    return "$rc"
+  fi
   echo "[$action] 已完成并通过验证。事务：$tx_id"
   hardening_tx_close
 }

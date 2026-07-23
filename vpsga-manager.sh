@@ -232,13 +232,21 @@ cmd_rollback() {
   manager_dir="$(cd "$(dirname "$0")" && pwd -P)"
   # shellcheck source=lib/hardening-transaction.sh
   source "$manager_dir/lib/hardening-transaction.sh"
+  # shellcheck source=lib/hardening-actions.sh
+  source "$manager_dir/lib/hardening-actions.sh"
   HARDENING_TX_DIR="$tx_dir"
   HARDENING_TX_ID="$tx_id"
   HARDENING_TX_ACTION="$action"
   HARDENING_TX_MANIFEST="$tx_dir/manifest.tsv"
+  HARDENING_TX_AFTER_MANIFEST="$tx_dir/after.tsv"
   if hardening_tx_rollback "用户手动回滚"; then
-    echo "事务已回滚：$tx_id"
-    echo "请立即重新运行 vpsga 复检。"
+    if hardening_after_rollback "$action"; then
+      echo "事务已回滚：$tx_id"
+      echo "请立即重新运行 vpsga 复检。"
+    else
+      echo "文件已恢复，但相关服务重新加载失败。请保留当前连接并立即检查。" >&2
+      exit 74
+    fi
   else
     echo "事务回滚不完整，请保留当前连接并检查：$tx_dir" >&2
     exit 74

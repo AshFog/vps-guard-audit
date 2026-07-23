@@ -7,6 +7,7 @@ HARDENING_TX_DIR=""
 HARDENING_TX_ID=""
 HARDENING_TX_ACTION=""
 HARDENING_TX_MANIFEST=""
+HARDENING_TX_AFTER_MANIFEST=""
 HARDENING_TX_CAPTURE_COUNT=0
 
 hardening_tx_safe_path() {
@@ -42,6 +43,7 @@ hardening_tx_begin() {
   (umask 077; mkdir -- "$HARDENING_TX_DIR" && mkdir -- "$HARDENING_TX_DIR/files") || return 73
   HARDENING_TX_ACTION="$action"
   HARDENING_TX_MANIFEST="$HARDENING_TX_DIR/manifest.tsv"
+  HARDENING_TX_AFTER_MANIFEST="$HARDENING_TX_DIR/after.tsv"
   HARDENING_TX_CAPTURE_COUNT=0
   : >"$HARDENING_TX_MANIFEST"
   printf 'action=%s\nstarted_at=%s\nstatus=running\n' \
@@ -102,8 +104,12 @@ hardening_tx_restore_entry() {
       chown "$uid:$gid" -- "$path" && chmod "$mode" -- "$path"
       ;;
     missing)
-      # 当前阶段不会创建新文件；保留该记录供后续配置型动作使用。
-      [[ ! -e "$path" ]] || return 74
+      # 配置型动作可能在事务中创建新文件。回滚只删除普通文件，
+      # 对目录、设备或后来被替换成符号链接的目标一律拒绝处理。
+      if [[ -e "$path" || -L "$path" ]]; then
+        [[ -f "$path" && ! -L "$path" ]] || return 76
+        rm -f -- "$path" || return 74
+      fi
       ;;
     *) return 76 ;;
   esac
@@ -113,6 +119,12 @@ hardening_tx_rollback() {
   local reason="${1:-验证失败}" line failed=0
   local -a entries=()
   [[ -n "$HARDENING_TX_DIR" && -f "$HARDENING_TX_MANIFEST" ]] || return 75
+  if grep -q '^status=committed$' "$HARDENING_TX_DIR/status" 2>/dev/null; then
+    hardening_tx_assert_current_state || {
+      echo "当前文件已在该事务之后发生变化；请先回滚较新的事务。" >&2
+      return 75
+    }
+  fi
   mapfile -t entries <"$HARDENING_TX_MANIFEST"
   for ((line=${#entries[@]}-1; line>=0; line--)); do
     IFS=$'\t' read -r type mode uid gid checksum backup path <<<"${entries[$line]}"
@@ -126,9 +138,56 @@ hardening_tx_rollback() {
   [[ "$failed" -eq 0 ]]
 }
 
+hardening_tx_write_current_state() {
+  local output="$1" line type _mode _uid _gid _checksum _backup path current_type mode uid gid checksum
+  local -a entries=()
+  mapfile -t entries <"$HARDENING_TX_MANIFEST"
+  : >"$output" || return 73
+  for line in "${entries[@]}"; do
+    IFS=$'\t' read -r type _mode _uid _gid _checksum _backup path <<<"$line"
+    hardening_tx_safe_path "$path" || return 76
+    if [[ -L "$path" ]]; then
+      return 76
+    elif [[ -f "$path" ]]; then
+      current_type="file"
+      checksum="$(sha256sum "$path" | awk '{print $1}')" || return 74
+    elif [[ -d "$path" ]]; then
+      current_type="directory"
+      checksum="-"
+    elif [[ ! -e "$path" ]]; then
+      current_type="missing"; mode="-"; uid="-"; gid="-"; checksum="-"
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$current_type" "$mode" "$uid" "$gid" "$checksum" "$path" >>"$output"
+      continue
+    else
+      return 76
+    fi
+    mode="$(stat -c %a "$path")" || return 74
+    uid="$(stat -c %u "$path")" || return 74
+    gid="$(stat -c %g "$path")" || return 74
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$current_type" "$mode" "$uid" "$gid" "$checksum" "$path" >>"$output"
+  done
+  chmod 0600 -- "$output"
+}
+
+hardening_tx_assert_current_state() {
+  local expected actual
+  [[ -n "$HARDENING_TX_AFTER_MANIFEST" ]] || HARDENING_TX_AFTER_MANIFEST="$HARDENING_TX_DIR/after.tsv"
+  [[ -f "$HARDENING_TX_AFTER_MANIFEST" && ! -L "$HARDENING_TX_AFTER_MANIFEST" ]] || return 75
+  actual="$HARDENING_TX_DIR/.current-$$"
+  hardening_tx_write_current_state "$actual" || { rm -f -- "$actual"; return 74; }
+  if cmp -s -- "$HARDENING_TX_AFTER_MANIFEST" "$actual"; then
+    rm -f -- "$actual"
+    return 0
+  fi
+  rm -f -- "$actual"
+  return 1
+}
+
 hardening_tx_commit() {
   local started
   [[ -n "$HARDENING_TX_DIR" ]] || return 75
+  [[ -n "$HARDENING_TX_AFTER_MANIFEST" ]] || HARDENING_TX_AFTER_MANIFEST="$HARDENING_TX_DIR/after.tsv"
+  hardening_tx_write_current_state "$HARDENING_TX_AFTER_MANIFEST" || return
   started="$(sed -n 's/^started_at=//p' "$HARDENING_TX_DIR/status")"
   printf 'action=%s\nstarted_at=%s\nstatus=committed\nfinished_at=%s\n' \
     "$HARDENING_TX_ACTION" "$started" "$(date -Is)" >"$HARDENING_TX_DIR/status"
@@ -140,5 +199,6 @@ hardening_tx_close() {
   HARDENING_TX_ID=""
   HARDENING_TX_ACTION=""
   HARDENING_TX_MANIFEST=""
+  HARDENING_TX_AFTER_MANIFEST=""
   HARDENING_TX_CAPTURE_COUNT=0
 }

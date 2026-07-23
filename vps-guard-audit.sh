@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # VPS Guard Audit
-# 面向中文用户的 Ubuntu / Debian VPS 只读安全审计工具。
+# 面向中文用户的 Ubuntu / Debian VPS 安全审计与可控加固工具。
 # Supported: Ubuntu 26.04/24.04/22.04 LTS and Debian 13/12/11.
-# Version: 6.0.0-dev.1
+# Version: 6.0.0-dev.2
 
 set -uo pipefail
 IFS=$'\n\t'
 export LC_ALL=C LANG=C
 umask 077
 
-VERSION="6.0.0-dev.1"
+VERSION="6.0.0-dev.2"
 SCHEMA_VERSION="2.0"
 COMMAND="audit"
 AFTER_AUDIT="auto"
@@ -125,7 +125,7 @@ fi
 
 declare -A ZH
 ZH[title]="VPS Guard Audit 完整报告"
-ZH[readonly]="默认只读：不会修改防火墙、SSH、用户或系统配置；仅在使用 --refresh-package-index 时刷新 APT 索引"
+ZH[readonly]="检测过程只读：只有明确输入 APPLY 执行已开放加固项，或使用 --refresh-package-index 时才会修改系统"
 ZH[start]="即将开始全面安全检测"
 ZH[system]="1. 操作系统支持状态与基础防护"
 ZH[ports]="2. 全部接口监听端口与网络暴露"
@@ -200,7 +200,11 @@ cleanup_runtime() {
   if [[ -n "${HARDENING_TX_DIR:-}" && -f "${HARDENING_TX_DIR}/status" ]] \
     && grep -q '^status=running$' "${HARDENING_TX_DIR}/status" 2>/dev/null \
     && declare -F hardening_tx_rollback >/dev/null 2>&1; then
-    hardening_tx_rollback "程序中断，退出时自动回滚" >/dev/null 2>&1 || true
+    interrupted_action="${HARDENING_TX_ACTION:-}"
+    if hardening_tx_rollback "程序中断，退出时自动回滚" >/dev/null 2>&1; then
+      [[ -z "$interrupted_action" ]] || ! declare -F hardening_after_rollback >/dev/null 2>&1 \
+        || hardening_after_rollback "$interrupted_action" >/dev/null 2>&1 || true
+    fi
   fi
   rm -rf -- "$TMP_DIR"
   [[ -n "$MODULE_TMP_DIR" ]] && rm -rf -- "$MODULE_TMP_DIR"

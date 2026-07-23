@@ -19,13 +19,13 @@ hardening_registry_visit() {
     "low" "cron.mode" "/etc/crontab /etc/cron.d/*" "yes" "HARD-1004"
   register_hardening_action "HARD-1005" "regular" "禁止 SSH 空密码登录" \
     "明确设置 PermitEmptyPasswords no；不会关闭正常的密码或密钥登录。" \
-    "low" "ssh.empty" "/etc/ssh/sshd_config.d/90-vpsga-hardening.conf" "planned" "HARD-1005"
+    "low" "ssh.empty" "/etc/ssh/sshd_config.d/90-vpsga-hardening.conf" "yes" "HARD-1005"
   register_hardening_action "HARD-1006" "regular" "限制 SSH 认证尝试次数" \
     "把单次连接允许的认证尝试限制在合理范围，降低暴力猜测效率。" \
-    "low" "ssh.tries" "/etc/ssh/sshd_config.d/90-vpsga-hardening.conf" "planned" "HARD-1006"
+    "low" "ssh.tries" "/etc/ssh/sshd_config.d/90-vpsga-hardening.conf" "yes" "HARD-1006"
   register_hardening_action "HARD-1007" "regular" "关闭 SSH X11 转发" \
     "普通 VPS 通常不需要远程图形转发；正在使用 X11 的主机不应选择。" \
-    "low" "ssh.x11" "/etc/ssh/sshd_config.d/90-vpsga-hardening.conf" "planned" "HARD-1007"
+    "low" "ssh.x11" "/etc/ssh/sshd_config.d/90-vpsga-hardening.conf" "yes" "HARD-1007"
   register_hardening_action "HARD-1008" "regular" "启用自动安全更新" \
     "安装并配置 unattended-upgrades，只自动应用安全更新。" \
     "low" "pkg.unattended" "/etc/apt/apt.conf.d/20auto-upgrades" "planned" "HARD-1008"
