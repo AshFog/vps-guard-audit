@@ -228,6 +228,8 @@ show_post_audit_menu() {
         if ((${#APPLICABLE_SENSITIVE[@]} == 0)); then echo "  暂无匹配项目。"; fi
         local i n=1
         for i in "${APPLICABLE_SENSITIVE[@]}"; do print_hardening_action "$i" "$n"; n=$((n+1)); done
+        echo
+        echo "当前连接敏感动作仍未开放。可先运行 vpsga connection-check 检查防失联条件。"
         ;;
       3) print_hardening_plan ;;
       4|0) return 0 ;;

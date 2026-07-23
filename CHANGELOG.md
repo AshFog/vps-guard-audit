@@ -1,5 +1,15 @@
 # Changelog
 
+## 6.0.0-dev.4
+
+- 新增连接敏感加固的统一防失联模块，真实识别当前 SSH 客户端、服务器地址与端口。
+- 备用管理员必须为非 root sudo/admin 用户，并拥有权限安全、包含有效公钥的 `authorized_keys`。
+- 第二终端确认必须来自不同 SSH 会话、相同服务器入口，并由指定备用管理员完成。
+- 新增 `vpsga connection-check` 与 `vpsga connection-confirm TOKEN`。
+- 建立 systemd 临时 timer 延时回滚接口；无法建立可靠 timer 时，连接敏感动作必须拒绝执行。
+- 事务新增 `pending_confirmation` 状态，超时只自动恢复尚未由第二终端确认的连接敏感变更。
+- 自动回滚前校验修改后指纹，拒绝覆盖事务完成后发生的其他配置变更。
+
 ## 6.0.0-dev.3
 
 - 开放 `HARD-1008` 至 `HARD-1010`：自动安全更新、兼容性较高的 sysctl 基线和 Core Dump 限制。

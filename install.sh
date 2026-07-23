@@ -22,6 +22,7 @@ REQUIRED_MODULES=(
   hardening-registry.sh
   hardening-transaction.sh
   hardening-actions.sh
+  connection-safety.sh
   hardening-plan.sh
   audit-platform.sh
   audit-access.sh

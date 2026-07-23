@@ -12,6 +12,7 @@ REQUIRED_MODULES=(
   hardening-registry.sh
   hardening-transaction.sh
   hardening-actions.sh
+  connection-safety.sh
   hardening-plan.sh
   audit-platform.sh
   audit-access.sh
@@ -253,6 +254,101 @@ cmd_rollback() {
   fi
 }
 
+load_hardening_runtime() {
+  local manager_dir
+  manager_dir="$(cd "$(dirname "$0")" && pwd -P)"
+  # shellcheck source=lib/hardening-transaction.sh
+  source "$manager_dir/lib/hardening-transaction.sh"
+  # shellcheck source=lib/hardening-actions.sh
+  source "$manager_dir/lib/hardening-actions.sh"
+  # shellcheck source=lib/connection-safety.sh
+  source "$manager_dir/lib/connection-safety.sh"
+}
+
+load_automatic_rollback_transaction() {
+  local tx_id="$1" tx_dir action status
+  [[ "$tx_id" =~ ^[0-9]{8}T[0-9]{6}Z-HARD-2[0-9]{3}-[0-9]+-[0-9]+$ ]] || return 64
+  [[ -d "$HARDENING_STATE_ROOT" && ! -L "$HARDENING_STATE_ROOT" ]] || return 66
+  tx_dir="$HARDENING_STATE_ROOT/$tx_id"
+  [[ -d "$tx_dir" && ! -L "$tx_dir" && -f "$tx_dir/status" && ! -L "$tx_dir/status" \
+    && -f "$tx_dir/manifest.tsv" && ! -L "$tx_dir/manifest.tsv" \
+    && -f "$tx_dir/after.tsv" && ! -L "$tx_dir/after.tsv" ]] || return 66
+  [[ "$(stat -c %u "$tx_dir")" == 0 ]] || return 76
+  if find "$tx_dir" -xdev -type f -perm /077 -print -quit 2>/dev/null | grep -q .; then return 76; fi
+  status="$(sed -n 's/^status=//p' "$tx_dir/status")"
+  action="$(sed -n 's/^action=//p' "$tx_dir/status")"
+  [[ "$status" == pending_confirmation && "$action" =~ ^HARD-2[0-9]{3}$ ]] || return 65
+  HARDENING_TX_DIR="$tx_dir"
+  HARDENING_TX_ID="$tx_id"
+  HARDENING_TX_ACTION="$action"
+  HARDENING_TX_MANIFEST="$tx_dir/manifest.tsv"
+  HARDENING_TX_AFTER_MANIFEST="$tx_dir/after.tsv"
+}
+
+cmd_rollback_auto() {
+  need_root rollback-auto "$@"
+  local tx_id="${1:-}" action
+  load_hardening_runtime
+  if ! load_automatic_rollback_transaction "$tx_id"; then
+    # timer 触发前事务可能已由第二终端确认；此时不应再恢复。
+    echo "自动回滚未执行：事务不存在、已确认或状态不再允许。" >&2
+    return 0
+  fi
+  action="$HARDENING_TX_ACTION"
+  hardening_tx_assert_current_state || {
+    echo "自动回滚拒绝覆盖事务完成后出现的新变更：$tx_id" >&2
+    return 75
+  }
+  if hardening_tx_rollback "第二终端确认超时，延时自动回滚" && hardening_after_rollback "$action"; then
+    echo "连接敏感加固已因确认超时自动回滚：$tx_id"
+  else
+    echo "连接敏感加固自动回滚不完整，请立即使用 VPS 控制台检查：$tx_id" >&2
+    return 74
+  fi
+}
+
+cmd_connection_check() {
+  need_root connection-check
+  local context admins
+  load_hardening_runtime
+  echo "连接敏感加固前置检查"
+  if context="$(connection_guard_current_context)"; then
+    printf '[正常] 当前 SSH：客户端 %s:%s → 服务器 %s:%s\n' \
+      "$(cut -f1 <<<"$context")" "$(cut -f2 <<<"$context")" \
+      "$(cut -f3 <<<"$context")" "$(cut -f4 <<<"$context")"
+  else
+    echo "[问题] 当前无法验证 SSH 会话。"
+    return 1
+  fi
+  admins="$(connection_guard_list_admins || true)"
+  if [[ -n "$admins" ]]; then
+    echo "[正常] 可用于第二终端验证的备用管理员："
+    sed 's/^/  - /' <<<"$admins"
+  else
+    echo "[问题] 没有找到同时具备 sudo/admin 权限与安全公钥的非 root 管理员。"
+    return 1
+  fi
+  if command -v systemd-run >/dev/null 2>&1 && command -v systemctl >/dev/null 2>&1; then
+    echo "[正常] 支持 systemd 延时自动回滚。"
+  else
+    echo "[问题] 不支持可靠的 systemd 延时自动回滚。"
+    return 1
+  fi
+  echo "[待确认] 仍需人工确认 VPS 网页控制台、VNC 或救援模式可用。"
+}
+
+cmd_connection_confirm() {
+  need_root connection-confirm "$@"
+  local token="${1:-}"
+  load_hardening_runtime
+  if connection_guard_confirm "$token"; then
+    echo "第二 SSH 连接验证成功。请返回原终端继续。"
+  else
+    echo "第二 SSH 连接验证失败。" >&2
+    return 65
+  fi
+}
+
 cmd_uninstall() {
   need_root uninstall
   local answer keep_state="yes" state_tmp=""
@@ -295,6 +391,9 @@ VPS Guard Audit 管理命令：
   vpsga update                 安装上游最新版本
   vpsga rollback               列出最近的加固事务
   vpsga rollback <事务编号>    交互确认后恢复该事务
+  vpsga connection-check        检查连接敏感加固的防失联前置条件
+  vpsga connection-confirm TOKEN
+                                从第二 SSH 终端确认备用登录可用
   vpsga uninstall              卸载程序
 EOF_USAGE
 }
@@ -303,6 +402,9 @@ case "${1:-}" in
   doctor) shift; cmd_doctor "$@" ;;
   update) shift; cmd_update "$@" ;;
   rollback) shift; cmd_rollback "$@" ;;
+  rollback-auto) shift; cmd_rollback_auto "$@" ;;
+  connection-check) shift; cmd_connection_check "$@" ;;
+  connection-confirm) shift; cmd_connection_confirm "$@" ;;
   uninstall) shift; cmd_uninstall "$@" ;;
   -h|--help|help|"") usage ;;
   *) echo "未知管理命令：$1" >&2; usage >&2; exit 64 ;;

@@ -2,14 +2,14 @@
 # VPS Guard Audit
 # 面向中文用户的 Ubuntu / Debian VPS 安全审计与可控加固工具。
 # Supported: Ubuntu 26.04/24.04/22.04 LTS and Debian 13/12/11.
-# Version: 6.0.0-dev.3
+# Version: 6.0.0-dev.4
 
 set -uo pipefail
 IFS=$'\n\t'
 export LC_ALL=C LANG=C
 umask 077
 
-VERSION="6.0.0-dev.3"
+VERSION="6.0.0-dev.4"
 SCHEMA_VERSION="2.0"
 COMMAND="audit"
 AFTER_AUDIT="auto"
@@ -425,7 +425,7 @@ load_audit_modules() {
     tmp_lib="$(mktemp -d)"
     MODULE_TMP_DIR="$tmp_lib"
     base_url="${VPS_GUARD_BASE_URL:-https://raw.githubusercontent.com/AshFog/vps-guard-audit/main/lib}"
-    for module in check-registry.sh hardening-registry.sh hardening-transaction.sh hardening-actions.sh hardening-plan.sh audit-platform.sh audit-access.sh audit-system.sh audit-containers.sh report-guidance-zh.sh report-guidance.sh report-output.sh audit-summary.sh; do
+    for module in check-registry.sh hardening-registry.sh hardening-transaction.sh hardening-actions.sh connection-safety.sh hardening-plan.sh audit-platform.sh audit-access.sh audit-system.sh audit-containers.sh report-guidance-zh.sh report-guidance.sh report-output.sh audit-summary.sh; do
       curl -fsSL "$base_url/$module" -o "$tmp_lib/$module" || {
         echo "下载模块失败：$module" >&2
         exit 69
@@ -451,7 +451,7 @@ load_audit_modules() {
       exit 76
     fi
   fi
-  for module in check-registry.sh hardening-registry.sh hardening-transaction.sh hardening-actions.sh hardening-plan.sh audit-platform.sh audit-access.sh audit-system.sh audit-containers.sh report-guidance-zh.sh report-guidance.sh report-output.sh audit-summary.sh; do
+  for module in check-registry.sh hardening-registry.sh hardening-transaction.sh hardening-actions.sh connection-safety.sh hardening-plan.sh audit-platform.sh audit-access.sh audit-system.sh audit-containers.sh report-guidance-zh.sh report-guidance.sh report-output.sh audit-summary.sh; do
     [[ -f "$lib_dir/$module" && ! -L "$lib_dir/$module" ]] || {
       echo "检测模块缺失或是符号链接：$lib_dir/$module" >&2
       exit 76

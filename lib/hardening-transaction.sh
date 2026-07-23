@@ -125,7 +125,7 @@ hardening_tx_rollback() {
   local reason="${1:-验证失败}" line failed=0
   local -a entries=()
   [[ -n "$HARDENING_TX_DIR" && -f "$HARDENING_TX_MANIFEST" ]] || return 75
-  if grep -q '^status=committed$' "$HARDENING_TX_DIR/status" 2>/dev/null; then
+  if grep -Eq '^status=(committed|pending_confirmation)$' "$HARDENING_TX_DIR/status" 2>/dev/null; then
     hardening_tx_assert_current_state || {
       echo "当前文件已在该事务之后发生变化；请先回滚较新的事务。" >&2
       return 75
@@ -196,6 +196,18 @@ hardening_tx_commit() {
   hardening_tx_write_current_state "$HARDENING_TX_AFTER_MANIFEST" || return
   started="$(sed -n 's/^started_at=//p' "$HARDENING_TX_DIR/status")"
   printf 'action=%s\nstarted_at=%s\nstatus=committed\nfinished_at=%s\n' \
+    "$HARDENING_TX_ACTION" "$started" "$(date -Is)" >"$HARDENING_TX_DIR/status"
+  chmod 0600 -- "$HARDENING_TX_DIR/status"
+}
+
+hardening_tx_mark_pending_confirmation() {
+  local started
+  [[ -n "$HARDENING_TX_DIR" ]] || return 75
+  [[ "$HARDENING_TX_ACTION" =~ ^HARD-2[0-9]{3}$ ]] || return 64
+  [[ -n "$HARDENING_TX_AFTER_MANIFEST" ]] || HARDENING_TX_AFTER_MANIFEST="$HARDENING_TX_DIR/after.tsv"
+  hardening_tx_write_current_state "$HARDENING_TX_AFTER_MANIFEST" || return
+  started="$(sed -n 's/^started_at=//p' "$HARDENING_TX_DIR/status")"
+  printf 'action=%s\nstarted_at=%s\nstatus=pending_confirmation\nchanged_at=%s\n' \
     "$HARDENING_TX_ACTION" "$started" "$(date -Is)" >"$HARDENING_TX_DIR/status"
   chmod 0600 -- "$HARDENING_TX_DIR/status"
 }
