@@ -36,6 +36,66 @@
 
 不得在唯一一台生产服务器上完成首次验收。
 
+### 受保护的验收记录
+
+候选分支提供 `tests/manual-vm-acceptance.sh`。它不会替用户执行加固，也不会缩短五分钟倒计时，只负责核对真实事务、第二 SSH 会话、systemd timer 和回滚结果。
+
+从候选分支安装完成后，在原 root SSH 会话建立本机验收记录：
+
+```bash
+sudo env \
+  VPSGA_VM_ACCEPTANCE_DISPOSABLE=YES \
+  VPSGA_VM_ACCEPTANCE_CONSOLE=READY \
+  bash tests/manual-vm-acceptance.sh start <备用管理员> <快照标识>
+```
+
+该命令只有在以下条件同时满足时才会返回 `RUN_ID`：
+
+- 系统为支持的 Ubuntu/Debian 版本且不是容器；
+- 当前是可验证的 SSH 会话；
+- 已安装版本及逐文件内容与无受跟踪改动的当前候选提交一致；
+- `vpsga doctor`、`connection-check`、`firewall-plan` 和 `workload-plan` 通过；
+- 指定的非 root sudo 管理员具有权限安全的 `authorized_keys`；
+- 操作者明确声明这是一次性 VM，且控制台和快照已经实际验证。
+
+每项确认路径提交后，不要直接在用于 `connection-confirm` 的第二终端记录结果。再以同一备用管理员打开第三条全新 SSH 会话，然后运行：
+
+```bash
+sudo env VPSGA_VM_ACCEPTANCE_DISPOSABLE=YES \
+  bash tests/manual-vm-acceptance.sh record \
+  <RUN_ID> <HARD-2001..HARD-2008> confirm <事务编号>
+```
+
+每项超时路径必须等待真实 timer 触发。回滚后，再以备用管理员建立一条全新 SSH 会话并运行：
+
+```bash
+sudo env VPSGA_VM_ACCEPTANCE_DISPOSABLE=YES \
+  bash tests/manual-vm-acceptance.sh record \
+  <RUN_ID> <HARD-2001..HARD-2008> timeout <事务编号>
+```
+
+助手会拒绝以下证据：
+
+- 原终端冒充第二或第三终端；
+- 非指定备用管理员记录结果；
+- SSH 连接到不同服务器地址或端口；
+- 动作与事务编号不匹配；
+- 确认路径没有 `committed` 和真实第二会话记录；
+- 超时路径不是 `rolled_back`、回滚服务失败或不足270秒；
+- timer 仍在运行、事务或验收目录权限不安全；
+- 重复覆盖已通过记录。
+
+查看进度并在16条路径全部完成后生成结果：
+
+```bash
+sudo bash tests/manual-vm-acceptance.sh status <RUN_ID>
+
+sudo env VPSGA_VM_ACCEPTANCE_DISPOSABLE=YES \
+  bash tests/manual-vm-acceptance.sh finish <RUN_ID>
+```
+
+`finish` 会再次运行 `vpsga doctor`，生成一个可附到 PR 的脱敏 `summary.md`，以及仅供私下保存的原始证据归档。摘要不包含 IP、端口、用户名、主机名或快照名称；两类文件权限均为 `0600`。不要把原始证据归档上传到公开仓库。
+
 ## 三、安装与审计
 
 1. 从候选分支执行本地 `install.sh`，确认 `vpsga --version` 与候选版本一致。
@@ -111,6 +171,7 @@ vpsga workload-plan
 5. 验证现有 v5 配置档案仍可读取；
 6. 在 GitHub 核对常规 CI 与六系统发行矩阵均为绿色；
 7. 记录 VM 镜像、系统版本、测试时间、测试人、失败与修复提交。
+8. 使用真实 VM 验收助手完成16条连接路径，将两台 VM 的脱敏摘要附到候选 PR；原始证据包私下留存。
 
 只有以下条件全部满足才可发布 v6.0.0：
 

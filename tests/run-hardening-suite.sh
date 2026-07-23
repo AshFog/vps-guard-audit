@@ -43,6 +43,7 @@ tests=(
   tests/test-hardening-sensitive-ssh.sh
   tests/test-hardening-network.sh
   tests/test-hardening-workloads.sh
+  tests/test-vm-acceptance.sh
 )
 
 for test_script in "${tests[@]}"; do

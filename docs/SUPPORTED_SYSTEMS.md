@@ -1,6 +1,6 @@
 # 支持系统与验证范围
 
-VPS Guard Audit v6.0.0-dev.8 面向采用 `apt`、OpenSSH、systemd 和常见 Linux 网络工具的 Ubuntu / Debian 主机。
+VPS Guard Audit v6.0.0-dev.9 面向采用 `apt`、OpenSSH、systemd 和常见 Linux 网络工具的 Ubuntu / Debian 主机。
 
 ## 支持与发行验收矩阵
 

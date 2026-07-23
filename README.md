@@ -44,6 +44,8 @@ vpsga plan
 
 发布前验收分为两层：Ubuntu/Debian 发行版矩阵自动验证18项隔离动作、全新安装与真实 v5.0.0 升级；真实 VM 再验证 systemd、OpenSSH、防火墙和第二终端失联恢复。完整步骤见 [v6 发布验收清单](docs/RELEASE_ACCEPTANCE_V6.md)。
 
+候选分支还提供 `tests/manual-vm-acceptance.sh`，用于在明确声明的一次性 Ubuntu/Debian VM 上核对并记录 `HARD-2001` 至 `HARD-2008` 的第二终端确认和五分钟超时回滚。它不会自动执行加固；完成后生成不含 IP、端口、用户名、主机名或快照名称的 PR 摘要，并把原始证据保留为私有 `0600` 归档。
+
 执行连接敏感动作前，可以先运行 `vpsga connection-check`。它会检查当前 SSH 入口、具备安全公钥的非 root sudo 管理员，以及 systemd 延时回滚支持；VPS 控制台是否真正可用仍需用户人工确认。
 
 涉及 SSH 隧道、IP 转发、IPv6、Docker/VPN 或 CUPS/Avahi 服务时，先运行 `vpsga workload-plan` 查看只读用途清单。它只提供证据，不会替用户判断某项业务是否可以停止。
