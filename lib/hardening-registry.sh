@@ -55,12 +55,12 @@ hardening_registry_visit() {
     "high" "f2b.absent,f2b.active,f2b.sshd_jail" "/etc/fail2ban/jail.d/vpsga-sshd.local" "yes" "HARD-2005"
   register_hardening_action "HARD-2006" "sensitive" "关闭 SSH 端口转发" \
     "会中断 SSH 隧道、开发工具、代理转发和部分远程管理工作流。" \
-    "high" "ssh.forward" "/etc/ssh/sshd_config.d/90-vpsga-hardening.conf" "planned" "HARD-2006"
+    "high" "ssh.forward" "/etc/ssh/sshd_config.d/90-vpsga-hardening.conf" "yes" "HARD-2006"
   register_hardening_action "HARD-2007" "sensitive" "调整 IP 转发或 IPv6" \
     "可能破坏 Docker、VPN、代理、软路由和双栈网络，不能套用统一值。" \
     "critical" "sysctl.ip_forward,sysctl.ipv6_forward,sysctl.ipv6" \
-    "/etc/sysctl.d/90-vpsga-hardening.conf" "planned" "HARD-2007"
+    "/etc/sysctl.d/91-vpsga-network-policy.conf" "yes" "HARD-2007"
   register_hardening_action "HARD-2008" "sensitive" "停用确认不需要的服务" \
     "服务名称相同不代表用途相同，判断错误会直接中断现有业务。" \
-    "critical" "service.unneeded,port.cups.*,port.avahi" "systemd unit" "planned" "HARD-2008"
+    "critical" "service.unneeded,port.cups.*,port.avahi" "CUPS 或 Avahi systemd 单元" "yes" "HARD-2008"
 }

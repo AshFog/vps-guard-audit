@@ -51,6 +51,7 @@ registry_lookup() {
     pkg.unattended|pkg.unattended.config) CHECK_ID="PKG-6003"; CHECK_CATEGORY="软件包" ;;
     pkg.reboot|pkg.kernel_running) CHECK_ID="PKG-6004"; CHECK_CATEGORY="软件包" ;;
     pkg.dpkg|pkg.index|pkg.index.refresh|pkg.index.age|pkg.held) CHECK_ID="PKG-6005"; CHECK_CATEGORY="软件包"; CHECK_DEPTH="standard" ;;
+    sysctl.ip_forward|sysctl.ipv6_forward|sysctl.ipv6) CHECK_ID="SYS-1203"; CHECK_CATEGORY="网络"; CHECK_REQUIRED_COMMANDS="sysctl"; CHECK_DEPTH="standard" ;;
     sysctl.*) CHECK_ID="SYS-1201"; CHECK_CATEGORY="内核"; CHECK_REQUIRED_COMMANDS="sysctl"; CHECK_DEPTH="standard" ;;
     coredump.*) CHECK_ID="SYS-1202"; CHECK_CATEGORY="内核"; CHECK_DEPTH="standard" ;;
     perm.*|world.*|suid.unusual) CHECK_ID="SYS-1301"; CHECK_CATEGORY="文件权限"; CHECK_DEPTH="deep" ;;

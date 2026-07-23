@@ -343,6 +343,12 @@ cmd_firewall_plan() {
   hardening_firewall_plan
 }
 
+cmd_workload_plan() {
+  need_root workload-plan
+  load_hardening_runtime
+  hardening_workload_plan
+}
+
 cmd_connection_confirm() {
   need_root connection-confirm "$@"
   local token="${1:-}"
@@ -399,6 +405,7 @@ VPS Guard Audit 管理命令：
   vpsga rollback <事务编号>    交互确认后恢复该事务
   vpsga connection-check        检查连接敏感加固的防失联前置条件
   vpsga firewall-plan           只读列出 SSH、监听端口、Docker 发布端口和 UFW 规则
+  vpsga workload-plan           只读检查 SSH 隧道、转发、容器/VPN 与候选服务
   vpsga connection-confirm TOKEN
                                 从第二 SSH 终端确认备用登录可用
   vpsga uninstall              卸载程序
@@ -412,6 +419,7 @@ case "${1:-}" in
   rollback-auto) shift; cmd_rollback_auto "$@" ;;
   connection-check) shift; cmd_connection_check "$@" ;;
   firewall-plan) shift; cmd_firewall_plan "$@" ;;
+  workload-plan) shift; cmd_workload_plan "$@" ;;
   connection-confirm) shift; cmd_connection_confirm "$@" ;;
   uninstall) shift; cmd_uninstall "$@" ;;
   -h|--help|help|"") usage ;;

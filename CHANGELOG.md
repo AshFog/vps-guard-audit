@@ -1,5 +1,14 @@
 # Changelog
 
+## 6.0.0-dev.7
+
+- 新增 `vpsga workload-plan`，只读展示 SSH TCP 转发、IPv4/IPv6 转发、相关网络接口、Docker/VPN 服务以及 CUPS/Avahi 候选单元。
+- 开放 `HARD-2006`：只有明确确认不使用 SSH 隧道、远程开发或代理转发后，才设置 `AllowTcpForwarding no`，并完成 sshd 验证、reload 与第二终端确认。
+- 开放 `HARD-2007`：一次只允许关闭一项网络能力；使用独立 sysctl 文件，保存并恢复运行时旧值，且拒绝从 IPv6 SSH 会话中关闭 IPv6。
+- 开放 `HARD-2008`：仅允许逐组停用 CUPS 或 Avahi 候选单元，保存每个 service/socket/path 的运行和启动状态，不接受任意服务名，也不卸载软件包。
+- 为 sysctl 与纯 systemd 状态事务增加运行时指纹；等待确认期间出现外部变更时，自动回滚不会覆盖后来状态。
+- 新增业务敏感隔离测试，覆盖确认缺失、SSH 超时恢复、sysctl 部分失败、IPv6 会话拒绝、服务停止失败及外部状态变化保护。
+
 ## 6.0.0-dev.6
 
 - 新增 `vpsga firewall-plan`，只读列出当前 SSH 入口、主机监听端口、Docker 发布端口与 UFW 编号规则。

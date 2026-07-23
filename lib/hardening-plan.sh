@@ -152,11 +152,11 @@ print_hardening_plan() {
     for i in "${APPLICABLE_SENSITIVE[@]}"; do print_hardening_action "$i" "$n"; n=$((n+1)); done
   fi
   echo
-  echo "HARD-1001 至 HARD-1010 可在确认后执行；HARD-2001 至 HARD-2005 还必须通过防失联和第二终端验证。"
+  echo "HARD-1001 至 HARD-1010 可在确认后执行；HARD-2001 至 HARD-2008 还必须通过用途确认、防失联和第二终端验证。"
 }
 
 show_sensitive_hardening_menu() {
-  local answer i n admin console_ack token tx_id admins action specs
+  local answer i n admin console_ack token tx_id admins action specs group policy
   while true; do
     echo
     echo "⚠ 连接敏感加固"
@@ -187,6 +187,9 @@ show_sensitive_hardening_menu() {
       continue
     fi
 
+    unset VPSGA_UFW_ALLOW_SPECS VPSGA_UFW_DELETE_NUMBERS VPSGA_SSH_FORWARD_ACK \
+      VPSGA_NETWORK_POLICY VPSGA_NETWORK_USAGE_ACK VPSGA_SERVICE_GROUP VPSGA_SERVICE_USAGE_ACK
+
     case "$action" in
       HARD-2003)
         hardening_firewall_plan || { echo "无法生成端口计划。" >&2; continue; }
@@ -210,6 +213,47 @@ show_sensitive_hardening_menu() {
           continue
         fi
         export VPSGA_UFW_DELETE_NUMBERS="$specs"
+        ;;
+      HARD-2006)
+        hardening_workload_plan || { echo "无法生成业务用途检查。" >&2; continue; }
+        echo "此设置会影响 ssh -L/-R/-D、VS Code Remote、数据库隧道和跳板机。"
+        printf '确认这些功能均不需要，请输入 NO SSH FORWARDING：'
+        IFS= read -r specs || return 0
+        [[ "$specs" == 'NO SSH FORWARDING' ]] || { echo "未确认 SSH 转发用途，已取消。"; continue; }
+        export VPSGA_SSH_FORWARD_ACK="$specs"
+        ;;
+      HARD-2007)
+        hardening_workload_plan || { echo "无法生成业务用途检查。" >&2; continue; }
+        echo "每次只能选择一个变化："
+        echo "  1. 关闭 IPv4 转发（net.ipv4.ip_forward=0）"
+        echo "  2. 关闭 IPv6 转发（net.ipv6.conf.all.forwarding=0）"
+        echo "  3. 关闭 IPv6（仅适合明确不使用双栈的主机）"
+        printf '请选择：'
+        IFS= read -r specs || return 0
+        case "$specs" in
+          1) policy=ipv4-forwarding-off ;;
+          2) policy=ipv6-forwarding-off ;;
+          3) policy=ipv6-off ;;
+          *) echo "网络策略选项无效，已取消。"; continue ;;
+        esac
+        printf '确认 Docker、VPN、代理、软路由均不依赖所选能力，请输入 NO ROUTING REQUIRED：'
+        IFS= read -r specs || return 0
+        [[ "$specs" == 'NO ROUTING REQUIRED' ]] || { echo "未确认网络用途，已取消。"; continue; }
+        export VPSGA_NETWORK_POLICY="$policy" VPSGA_NETWORK_USAGE_ACK="$specs"
+        ;;
+      HARD-2008)
+        hardening_workload_plan || { echo "无法生成业务用途检查。" >&2; continue; }
+        echo "仅支持经过审计的候选组：cups 或 avahi；不会卸载软件包。"
+        printf '请输入要停用的服务组：'
+        IFS= read -r group || return 0
+        if ! hardening_service_group_valid "$group" || ! hardening_service_group_available "$group"; then
+          echo "服务组无效或没有找到对应 systemd 单元，已取消。" >&2
+          continue
+        fi
+        printf '确认该服务没有打印或局域网发现用途，请输入 SERVICE NOT NEEDED：'
+        IFS= read -r specs || return 0
+        [[ "$specs" == 'SERVICE NOT NEEDED' ]] || { echo "未确认服务用途，已取消。"; continue; }
+        export VPSGA_SERVICE_GROUP="$group" VPSGA_SERVICE_USAGE_ACK="$specs"
         ;;
     esac
 

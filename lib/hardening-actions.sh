@@ -228,7 +228,7 @@ hardening_ssh_reload() {
 
 hardening_ssh_write_setting() {
   local managed tmp dir line key value
-  local first="" second="" third="" fourth="" fifth="" sixth=""
+  local first="" second="" third="" fourth="" fifth="" sixth="" seventh=""
   (($# >= 2 && $# % 2 == 0)) || return 64
   managed="$(hardening_ssh_managed_path)"
   dir="${managed%/*}"
@@ -244,6 +244,7 @@ hardening_ssh_write_setting() {
         PermitRootLogin) fourth="$line" ;;
         PasswordAuthentication) fifth="$line" ;;
         KbdInteractiveAuthentication) sixth="$line" ;;
+        AllowTcpForwarding) seventh="$line" ;;
       esac
     done <"$managed"
   fi
@@ -256,6 +257,7 @@ hardening_ssh_write_setting() {
       PermitRootLogin) fourth="$key $value" ;;
       PasswordAuthentication) fifth="$key $value" ;;
       KbdInteractiveAuthentication) sixth="$key $value" ;;
+      AllowTcpForwarding) seventh="$key $value" ;;
       *) return 64 ;;
     esac
   done
@@ -270,6 +272,7 @@ hardening_ssh_write_setting() {
     [[ -z "$fourth" ]] || echo "$fourth"
     [[ -z "$fifth" ]] || echo "$fifth"
     [[ -z "$sixth" ]] || echo "$sixth"
+    [[ -z "$seventh" ]] || echo "$seventh"
   } >"$tmp" || { rm -f -- "$tmp"; return 73; }
   chmod 0600 -- "$tmp" || { rm -f -- "$tmp"; return 73; }
   if [[ -z "${VPSGA_SYSTEM_ROOT:-}" ]]; then
@@ -286,6 +289,13 @@ hardening_action_1007() { hardening_ssh_write_setting X11Forwarding no; }
 hardening_action_2001() { hardening_ssh_write_setting PermitRootLogin no; }
 hardening_action_2002() {
   hardening_ssh_write_setting PasswordAuthentication no KbdInteractiveAuthentication no
+}
+hardening_action_2006() {
+  [[ "${VPSGA_SSH_FORWARD_ACK:-}" == 'NO SSH FORWARDING' ]] || {
+    echo "关闭 SSH TCP 转发前必须明确确认没有 SSH 隧道或远程开发依赖。" >&2
+    return 65
+  }
+  hardening_ssh_write_setting AllowTcpForwarding no
 }
 
 hardening_ssh_validate_setting() {
@@ -310,6 +320,7 @@ hardening_validate_2002() {
   hardening_ssh_validate_setting PasswordAuthentication no &&
     hardening_ssh_validate_setting KbdInteractiveAuthentication no
 }
+hardening_validate_2006() { hardening_ssh_validate_setting AllowTcpForwarding no; }
 
 hardening_ufw_command() {
   if [[ -n "${VPSGA_TEST_UFW_BIN:-}" ]]; then
@@ -325,6 +336,77 @@ hardening_systemctl_command() {
   else
     command systemctl "$@"
   fi
+}
+
+hardening_candidate_units() {
+  case "$1" in
+    cups) printf '%s\n' cups.service cups.socket cups.path cups-browsed.service ;;
+    avahi) printf '%s\n' avahi-daemon.service avahi-daemon.socket ;;
+    *) return 64 ;;
+  esac
+}
+
+hardening_systemd_unit_load_state() {
+  hardening_systemctl_command show "$1" --property=LoadState --value 2>/dev/null
+}
+
+hardening_systemd_unit_file_state() {
+  local state
+  state="$(hardening_systemctl_command is-enabled "$1" 2>/dev/null || true)"
+  [[ "$state" =~ ^(enabled|enabled-runtime|disabled|static|indirect|generated|transient|masked|masked-runtime|alias)$ ]] || return 69
+  printf '%s\n' "$state"
+}
+
+hardening_systemd_unit_is_active() {
+  local state
+  state="$(hardening_systemctl_command is-active "$1" 2>/dev/null || true)"
+  grep -Fqx active <<<"$state"
+}
+
+hardening_workload_plan() {
+  local context value unit load active enabled group output
+  echo "业务用途检查（只读）"
+  if context="$(connection_guard_current_context 2>/dev/null)"; then
+    printf '  当前 SSH：%s:%s → %s:%s\n' \
+      "$(cut -f1 <<<"$context")" "$(cut -f2 <<<"$context")" \
+      "$(cut -f3 <<<"$context")" "$(cut -f4 <<<"$context")"
+  else
+    echo "  当前不是可验证的 SSH 会话；连接敏感动作仍会拒绝执行。"
+  fi
+
+  value="$(hardening_sshd_effective_value AllowTcpForwarding 2>/dev/null || true)"
+  echo "  SSH TCP 转发：${value:-无法读取}"
+  echo "  请人工确认：ssh -L/-R/-D、VS Code Remote、数据库隧道、跳板机和代理转发。"
+
+  echo "  网络转发状态："
+  for unit in net.ipv4.ip_forward net.ipv6.conf.all.forwarding net.ipv6.conf.all.disable_ipv6; do
+    value="$(hardening_sysctl_command -n "$unit" 2>/dev/null || true)"
+    printf '    - %s = %s\n' "$unit" "${value:-不可用}"
+  done
+  if command -v ip >/dev/null 2>&1; then
+    output="$(ip -brief link 2>/dev/null | awk '$1 ~ /^(docker|br-|veth|virbr|wg|tun|tap|tailscale|zt|cni|flannel)/ {print}' || true)"
+    if [[ -n "$output" ]]; then
+      echo "  检测到可能依赖转发的网络接口："
+      sed 's/^/    - /' <<<"$output"
+    fi
+  fi
+  for unit in docker.service containerd.service 'wg-quick@*.service' openvpn.service tailscaled.service; do
+    if hardening_systemd_unit_is_active "$unit"; then
+      echo "  [运行中] $unit（关闭转发或 IPv6 前必须确认）"
+    fi
+  done
+
+  echo "  可停用服务候选："
+  for group in cups avahi; do
+    while IFS= read -r unit; do
+      load="$(hardening_systemd_unit_load_state "$unit" 2>/dev/null || true)"
+      [[ "$load" == loaded ]] || continue
+      if hardening_systemd_unit_is_active "$unit"; then active=active; else active=inactive; fi
+      enabled="$(hardening_systemd_unit_file_state "$unit" 2>/dev/null || echo unknown)"
+      printf '    - %-28s 运行=%s 启动=%s\n' "$unit" "$active" "$enabled"
+    done < <(hardening_candidate_units "$group")
+  done
+  echo "  这里只列出 CUPS 与 Avahi 候选；不会自动选择，也不会卸载软件包。"
 }
 
 hardening_firewall_plan() {
@@ -761,6 +843,243 @@ hardening_validate_1009() {
   done < <(hardening_sysctl_pairs)
 }
 
+hardening_network_policy_path() {
+  hardening_system_path /etc/sysctl.d/91-vpsga-network-policy.conf
+}
+
+hardening_network_policy_pairs() {
+  local policy="$1" path line key value
+  local -A values=() counts=()
+  path="$(hardening_network_policy_path)"
+  case "$policy" in
+    ipv4-forwarding-off|ipv6-forwarding-off|ipv6-off) ;;
+    *) return 64 ;;
+  esac
+  if [[ -e "$path" || -L "$path" ]]; then
+    [[ -f "$path" && ! -L "$path" ]] || return 76
+    grep -Fqx '# Managed by VPS Guard Audit. Local edits may be replaced.' "$path" || return 76
+    while IFS= read -r line; do
+      [[ -z "${line//[[:space:]]/}" || "$line" =~ ^[[:space:]]*# ]] && continue
+      [[ "$line" =~ ^[[:space:]]*([a-z0-9_.]+)[[:space:]]*=[[:space:]]*([01])[[:space:]]*$ ]] || return 76
+      key="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
+      case "$key" in
+        net.ipv4.ip_forward|net.ipv6.conf.all.forwarding|net.ipv6.conf.all.disable_ipv6|net.ipv6.conf.default.disable_ipv6) ;;
+        *) return 76 ;;
+      esac
+      counts[$key]=$((${counts[$key]:-0} + 1))
+      ((counts[$key] == 1)) || return 76
+      values[$key]="$value"
+    done <"$path"
+  fi
+  case "$policy" in
+    ipv4-forwarding-off) values[net.ipv4.ip_forward]=0 ;;
+    ipv6-forwarding-off) values[net.ipv6.conf.all.forwarding]=0 ;;
+    ipv6-off)
+      values[net.ipv6.conf.all.disable_ipv6]=1
+      values[net.ipv6.conf.default.disable_ipv6]=1
+      ;;
+  esac
+  for key in net.ipv4.ip_forward net.ipv6.conf.all.forwarding \
+    net.ipv6.conf.all.disable_ipv6 net.ipv6.conf.default.disable_ipv6; do
+    [[ -n "${values[$key]+x}" ]] && printf '%s=%s\n' "$key" "${values[$key]}"
+  done
+  return 0
+}
+
+hardening_network_snapshot_runtime() {
+  local pairs="$1" output="$2" key _expected value
+  : >"$output" || return 73
+  while IFS='=' read -r key _expected; do
+    [[ -n "$key" ]] || continue
+    value="$(hardening_sysctl_command -n "$key" 2>/dev/null)" || {
+      echo "当前内核不支持所选网络参数：$key" >&2
+      return 69
+    }
+    [[ "$value" =~ ^[01]$ ]] || return 76
+    printf '%s\t%s\n' "$key" "$value" >>"$output"
+  done <<<"$pairs"
+  chmod 0600 -- "$output"
+}
+
+hardening_network_runtime_matches() {
+  local snapshot="$1" key expected actual
+  [[ -f "$snapshot" && ! -L "$snapshot" ]] || return 74
+  while IFS=$'\t' read -r key expected; do
+    [[ "$key" =~ ^[a-z0-9_.]+$ && "$expected" =~ ^[01]$ ]] || return 76
+    actual="$(hardening_sysctl_command -n "$key" 2>/dev/null)" || return
+    [[ "$actual" == "$expected" ]] || return 1
+  done <"$snapshot"
+}
+
+hardening_network_restore_runtime() {
+  local snapshot="$HARDENING_TX_DIR/network-before.tsv" key value failed=0
+  [[ -f "$snapshot" && ! -L "$snapshot" ]] || return 0
+  while IFS=$'\t' read -r key value; do
+    [[ "$key" =~ ^[a-z0-9_.]+$ && "$value" =~ ^[01]$ ]] || return 76
+    hardening_sysctl_command -w "$key=$value" >/dev/null || failed=1
+  done <"$snapshot"
+  [[ "$failed" -eq 0 ]]
+}
+
+hardening_action_2007() {
+  local policy="${VPSGA_NETWORK_POLICY:-}" context client_ip server_ip pairs content path marker
+  marker='# Managed by VPS Guard Audit. Local edits may be replaced.'
+  [[ "${VPSGA_NETWORK_USAGE_ACK:-}" == 'NO ROUTING REQUIRED' ]] || {
+    echo "必须明确确认 Docker、VPN、代理和软路由不依赖所选网络能力。" >&2
+    return 65
+  }
+  if [[ "$policy" == ipv6-off ]]; then
+    context="$(connection_guard_current_context)" || return
+    client_ip="$(cut -f1 <<<"$context")"; server_ip="$(cut -f3 <<<"$context")"
+    if [[ "$client_ip" == *:* || "$server_ip" == *:* ]]; then
+      echo "当前 SSH 会话使用 IPv6，拒绝在此连接中关闭 IPv6。" >&2
+      return 65
+    fi
+  fi
+  pairs="$(hardening_network_policy_pairs "$policy")" || return
+  path="$(hardening_network_policy_path)"
+  hardening_network_snapshot_runtime "$pairs" "$HARDENING_TX_DIR/network-before.tsv" || return
+  printf '%s\n' "$policy" >"$HARDENING_TX_DIR/network-policy"
+  chmod 0600 -- "$HARDENING_TX_DIR/network-policy"
+  content="$marker
+# Each setting was selected explicitly after a workload review.
+"
+  while IFS='=' read -r key value; do
+    [[ -n "$key" ]] && content+="$key = $value"$'\n'
+  done <<<"$pairs"
+  hardening_write_managed_file "$path" "$content" "$marker" || return
+  hardening_sysctl_command -p "$path" >/dev/null || return
+  hardening_network_snapshot_runtime "$pairs" "$HARDENING_TX_DIR/network-after.tsv"
+}
+
+hardening_validate_2007() {
+  local policy pairs path key expected actual
+  policy="$(cat "$HARDENING_TX_DIR/network-policy" 2>/dev/null)" || return
+  pairs="$(hardening_network_policy_pairs "$policy")" || return
+  path="$(hardening_network_policy_path)"
+  [[ -f "$path" && ! -L "$path" && "$(stat -c %a "$path")" == 600 ]] || return 1
+  while IFS='=' read -r key expected; do
+    [[ "$(grep -Ec "^[[:space:]]*${key//./\\.}[[:space:]]*=[[:space:]]*$expected[[:space:]]*$" "$path")" == 1 ]] || return 1
+    actual="$(hardening_sysctl_command -n "$key" 2>/dev/null)" || return
+    [[ "$actual" == "$expected" ]] || return 1
+  done <<<"$pairs"
+  hardening_network_runtime_matches "$HARDENING_TX_DIR/network-after.tsv"
+}
+
+hardening_service_group_valid() {
+  [[ "$1" == cups || "$1" == avahi ]]
+}
+
+hardening_service_group_available() {
+  local unit
+  hardening_service_group_valid "$1" || return 64
+  while IFS= read -r unit; do
+    [[ "$(hardening_systemd_unit_load_state "$unit" 2>/dev/null || true)" == loaded ]] && return 0
+  done < <(hardening_candidate_units "$1")
+  return 1
+}
+
+hardening_service_snapshot() {
+  local group="$1" output="$2" unit load active enabled count=0
+  hardening_service_group_valid "$group" || return 64
+  : >"$output" || return 73
+  while IFS= read -r unit; do
+    load="$(hardening_systemd_unit_load_state "$unit" 2>/dev/null || true)"
+    [[ "$load" == loaded ]] || continue
+    if hardening_systemd_unit_is_active "$unit"; then active=1; else active=0; fi
+    enabled="$(hardening_systemd_unit_file_state "$unit")" || return
+    printf '%s\t%s\t%s\n' "$unit" "$active" "$enabled" >>"$output"
+    count=$((count + 1))
+  done < <(hardening_candidate_units "$group")
+  ((count > 0)) || {
+    echo "没有找到可管理的 $group systemd 单元。" >&2
+    return 69
+  }
+  chmod 0600 -- "$output"
+}
+
+hardening_service_state_matches() {
+  local snapshot="$1" unit expected_active expected_enabled active enabled
+  [[ -f "$snapshot" && ! -L "$snapshot" ]] || return 74
+  while IFS=$'\t' read -r unit expected_active expected_enabled; do
+    [[ "$unit" =~ ^[a-zA-Z0-9_.@-]+\.(service|socket|path)$ && "$expected_active" =~ ^[01]$ ]] || return 76
+    if hardening_systemd_unit_is_active "$unit"; then active=1; else active=0; fi
+    enabled="$(hardening_systemd_unit_file_state "$unit")" || return
+    [[ "$active" == "$expected_active" && "$enabled" == "$expected_enabled" ]] || return 1
+  done <"$snapshot"
+}
+
+hardening_action_2008() {
+  local group="${VPSGA_SERVICE_GROUP:-}" before="$HARDENING_TX_DIR/service-before.tsv"
+  local after="$HARDENING_TX_DIR/service-after.tsv" unit _active enabled
+  local -a units=()
+  [[ "${VPSGA_SERVICE_USAGE_ACK:-}" == 'SERVICE NOT NEEDED' ]] || {
+    echo "必须明确确认所选服务没有业务用途。" >&2
+    return 65
+  }
+  hardening_service_group_valid "$group" || return 64
+  hardening_service_snapshot "$group" "$before" || return
+  printf '%s\n' "$group" >"$HARDENING_TX_DIR/service-group"
+  chmod 0600 -- "$HARDENING_TX_DIR/service-group"
+  while IFS=$'\t' read -r unit _active enabled; do
+    units+=("$unit")
+    case "$enabled" in
+      enabled) hardening_systemctl_command disable "$unit" || return ;;
+      enabled-runtime) hardening_systemctl_command disable --runtime "$unit" || return ;;
+    esac
+  done <"$before"
+  for ((unit=${#units[@]}-1; unit>=0; unit--)); do
+    hardening_systemctl_command stop "${units[$unit]}" || return
+  done
+  hardening_service_snapshot "$group" "$after"
+}
+
+hardening_validate_2008() {
+  local group unit active enabled
+  group="$(cat "$HARDENING_TX_DIR/service-group" 2>/dev/null)" || return
+  hardening_service_group_valid "$group" || return 64
+  hardening_service_state_matches "$HARDENING_TX_DIR/service-after.tsv" || return
+  while IFS=$'\t' read -r unit active enabled; do
+    [[ "$active" == 0 ]] || return 1
+    [[ "$enabled" != enabled && "$enabled" != enabled-runtime ]] || return 1
+  done <"$HARDENING_TX_DIR/service-after.tsv"
+}
+
+hardening_service_restore_state() {
+  local snapshot="$HARDENING_TX_DIR/service-before.tsv" unit active enabled failed=0
+  [[ -f "$snapshot" && ! -L "$snapshot" ]] || return 0
+  while IFS=$'\t' read -r unit _active enabled; do
+    case "$enabled" in
+      enabled) hardening_systemctl_command enable "$unit" || failed=1 ;;
+      enabled-runtime) hardening_systemctl_command enable --runtime "$unit" || failed=1 ;;
+      disabled) hardening_systemctl_command disable "$unit" || failed=1 ;;
+    esac
+  done <"$snapshot"
+  while IFS=$'\t' read -r unit active _enabled; do
+    if [[ "$active" == 1 ]]; then
+      hardening_systemctl_command start "$unit" || failed=1
+    fi
+  done <"$snapshot"
+  [[ "$failed" -eq 0 ]]
+}
+
+hardening_before_rollback() {
+  case "$1" in
+    HARD-2007)
+      hardening_network_runtime_matches "$HARDENING_TX_DIR/network-after.tsv" || {
+        echo "网络运行时状态已在事务后变化，拒绝覆盖。" >&2
+        return 75
+      }
+      ;;
+    HARD-2008)
+      hardening_service_state_matches "$HARDENING_TX_DIR/service-after.tsv" || {
+        echo "服务状态已在事务后变化，拒绝覆盖。" >&2
+        return 75
+      }
+      ;;
+  esac
+}
+
 hardening_core_limits_path() {
   hardening_system_path /etc/security/limits.d/90-vpsga-hardening.conf
 }
@@ -798,17 +1117,19 @@ hardening_validate_1010() {
 
 hardening_after_rollback() {
   case "$1" in
-    HARD-1005|HARD-1006|HARD-1007|HARD-2001|HARD-2002)
+    HARD-1005|HARD-1006|HARD-1007|HARD-2001|HARD-2002|HARD-2006)
       hardening_sshd_test && hardening_ssh_reload
       ;;
     HARD-2003|HARD-2004)
-      if [[ "$(cat "$HARDENING_TX_DIR/ufw-before" 2>/dev/null)" == inactive ]]; then
+      [[ -f "$HARDENING_TX_DIR/ufw-before" && ! -L "$HARDENING_TX_DIR/ufw-before" ]] || return 0
+      if [[ "$(cat "$HARDENING_TX_DIR/ufw-before")" == inactive ]]; then
         hardening_ufw_command --force disable
       else
         hardening_ufw_command reload
       fi
       ;;
     HARD-2005)
+      [[ -f "$HARDENING_TX_DIR/fail2ban-before" && ! -L "$HARDENING_TX_DIR/fail2ban-before" ]] || return 0
       if grep -q '^active=1$' "$HARDENING_TX_DIR/fail2ban-before" 2>/dev/null; then
         hardening_systemctl_command restart fail2ban
       else
@@ -823,8 +1144,23 @@ hardening_after_rollback() {
     HARD-1009)
       hardening_sysctl_restore_runtime
       ;;
+    HARD-2007)
+      hardening_network_restore_runtime
+      ;;
+    HARD-2008)
+      hardening_service_restore_state
+      ;;
     *) return 0 ;;
   esac
+}
+
+hardening_run_after_rollback() {
+  case "$1" in
+    HARD-2007) [[ -f "$HARDENING_TX_DIR/network-before.tsv" ]] || return 0 ;;
+    HARD-2008) [[ -f "$HARDENING_TX_DIR/service-before.tsv" ]] || return 0 ;;
+    *) [[ -s "$HARDENING_TX_MANIFEST" ]] || return 0 ;;
+  esac
+  hardening_after_rollback "$1"
 }
 
 run_hardening_action_body() {
@@ -844,6 +1180,9 @@ run_hardening_action_body() {
     HARD-2003) hardening_action_2003 ;;
     HARD-2004) hardening_action_2004 ;;
     HARD-2005) hardening_action_2005 ;;
+    HARD-2006) hardening_action_2006 ;;
+    HARD-2007) hardening_action_2007 ;;
+    HARD-2008) hardening_action_2008 ;;
     *) echo "该项目尚未开放自动执行：$1" >&2; return 78 ;;
   esac
 }
@@ -865,6 +1204,9 @@ validate_hardening_action() {
     HARD-2003) hardening_validate_2003 ;;
     HARD-2004) hardening_validate_2004 ;;
     HARD-2005) hardening_validate_2005 ;;
+    HARD-2006) hardening_validate_2006 ;;
+    HARD-2007) hardening_validate_2007 ;;
+    HARD-2008) hardening_validate_2008 ;;
     *) return 78 ;;
   esac
 }
@@ -882,7 +1224,7 @@ execute_hardening_action() {
   else
     rc=$?
     hardening_tx_rollback "动作执行失败" || rc=74
-    [[ ! -s "$HARDENING_TX_MANIFEST" ]] || hardening_after_rollback "$action" || rc=74
+    hardening_run_after_rollback "$action" || rc=74
     echo "[$action] 执行失败，已尝试自动回滚。事务：$tx_id" >&2
     hardening_tx_close
     return "$rc"
@@ -892,7 +1234,7 @@ execute_hardening_action() {
   else
     rc=$?
     hardening_tx_rollback "修改后验证失败" || rc=74
-    [[ ! -s "$HARDENING_TX_MANIFEST" ]] || hardening_after_rollback "$action" || rc=74
+    hardening_run_after_rollback "$action" || rc=74
     echo "[$action] 验证失败，已自动回滚。事务：$tx_id" >&2
     hardening_tx_close
     return "$rc"
@@ -902,7 +1244,7 @@ execute_hardening_action() {
   else
     rc=$?
     hardening_tx_rollback "事务提交失败" || rc=74
-    [[ ! -s "$HARDENING_TX_MANIFEST" ]] || hardening_after_rollback "$action" || rc=74
+    hardening_run_after_rollback "$action" || rc=74
     echo "[$action] 无法提交事务，已尝试自动回滚。事务：$tx_id" >&2
     hardening_tx_close
     return "$rc"
@@ -913,7 +1255,7 @@ execute_hardening_action() {
 
 stage_sensitive_hardening_action() {
   local action="$1" token="$2" rc=0 tx_id
-  [[ "$action" =~ ^HARD-200[1-5]$ ]] || return 78
+  [[ "$action" =~ ^HARD-200[1-8]$ ]] || return 78
   # 软件包安装不改变连接策略，并可能耗时较长；必须在5分钟网络回滚计时器启动前完成。
   hardening_sensitive_preflight "$action" || return
   hardening_tx_begin "$action" || return
@@ -934,7 +1276,7 @@ stage_sensitive_hardening_action() {
   else
     rc=$?
     hardening_tx_rollback "连接敏感动作执行失败" || rc=74
-    [[ ! -s "$HARDENING_TX_MANIFEST" ]] || hardening_after_rollback "$action" || rc=74
+    hardening_run_after_rollback "$action" || rc=74
     connection_guard_cancel_rollback "$tx_id" >/dev/null 2>&1 || true
     echo "[$action] 执行失败，已尝试自动回滚。事务：$tx_id" >&2
     hardening_tx_close
@@ -945,7 +1287,7 @@ stage_sensitive_hardening_action() {
   else
     rc=$?
     hardening_tx_rollback "连接敏感修改验证失败" || rc=74
-    [[ ! -s "$HARDENING_TX_MANIFEST" ]] || hardening_after_rollback "$action" || rc=74
+    hardening_run_after_rollback "$action" || rc=74
     connection_guard_cancel_rollback "$tx_id" >/dev/null 2>&1 || true
     echo "[$action] 验证失败，已尝试自动回滚。事务：$tx_id" >&2
     hardening_tx_close
@@ -956,7 +1298,7 @@ stage_sensitive_hardening_action() {
   else
     rc=$?
     hardening_tx_rollback "无法绑定第二终端确认" || rc=74
-    hardening_after_rollback "$action" || rc=74
+    hardening_run_after_rollback "$action" || rc=74
     connection_guard_cancel_rollback "$tx_id" >/dev/null 2>&1 || true
     echo "[$action] 无法进入第二终端确认，已尝试自动回滚。事务：$tx_id" >&2
     hardening_tx_close

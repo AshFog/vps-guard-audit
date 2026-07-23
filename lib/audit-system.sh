@@ -130,6 +130,30 @@ audit_system() {
     check_sysctl net.ipv4.conf.all.log_martians 1
     check_sysctl net.ipv6.conf.all.accept_redirects 0
     check_sysctl net.ipv6.conf.default.accept_redirects 0
+
+    check_forwarding_policy() {
+      local key="$1" legacy_id="$2" label="$3" val
+      val="$(sysctl -n "$key" 2>/dev/null || true)"
+      if [[ -z "$val" ]]; then
+        record SKIP "$legacy_id" "$label 在当前系统中不可读取" "$label is unavailable on this system"
+      elif [[ "$val" == 0 ]]; then
+        record PASS "$legacy_id" "$label 已关闭" "$label is disabled" "$key=0"
+      elif [[ "$HOST_PROFILE" == docker || "$HOST_PROFILE" == proxy || "$HOST_PROFILE" == home ]]; then
+        record INFO "$legacy_id" "$label 已启用，当前配置档案可能依赖它" "$label is enabled and may be required by the selected profile" "$key=$val"
+      elif [[ "$POLICY" == strict ]]; then
+        record WARN "$legacy_id" "严格策略下 $label 已启用，请确认路由用途" "$label is enabled under strict policy; confirm routing use" "$key=$val"
+      else
+        record INFO "$legacy_id" "$label 已启用，请确认 Docker、VPN、代理或路由用途" "$label is enabled; confirm container, VPN, proxy or routing use" "$key=$val"
+      fi
+    }
+    check_forwarding_policy net.ipv4.ip_forward sysctl.ip_forward "IPv4 转发"
+    check_forwarding_policy net.ipv6.conf.all.forwarding sysctl.ipv6_forward "IPv6 转发"
+    ipv6_disabled="$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null || true)"
+    case "$ipv6_disabled" in
+      0) record INFO sysctl.ipv6 "IPv6 已启用；这本身不是安全问题" "IPv6 is enabled; this is not inherently a security issue" ;;
+      1) record INFO sysctl.ipv6 "IPv6 已显式关闭" "IPv6 is explicitly disabled" ;;
+      *) record SKIP sysctl.ipv6 "无法确认 IPv6 启用状态" "Unable to determine whether IPv6 is enabled" ;;
+    esac
     else
       section "$(t sysctl)"
       record SKIP sysctl.depth "快速检查跳过内核参数基线" "Kernel baseline skipped in quick mode"

@@ -130,6 +130,9 @@ hardening_tx_rollback() {
       echo "当前文件已在该事务之后发生变化；请先回滚较新的事务。" >&2
       return 75
     }
+    if declare -F hardening_before_rollback >/dev/null 2>&1; then
+      hardening_before_rollback "$HARDENING_TX_ACTION" || return
+    fi
   fi
   mapfile -t entries <"$HARDENING_TX_MANIFEST"
   for ((line=${#entries[@]}-1; line>=0; line--)); do

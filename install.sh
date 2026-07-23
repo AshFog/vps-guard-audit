@@ -152,7 +152,7 @@ MANAGER="$CURRENT/vpsga-manager.sh"
 }
 
 case "${1-}" in
-  doctor|update|rollback|rollback-auto|connection-check|connection-confirm|firewall-plan|uninstall)
+  doctor|update|rollback|rollback-auto|connection-check|connection-confirm|firewall-plan|workload-plan|uninstall)
     exec "$MANAGER" "$@"
     ;;
   -h|--help|-v|--version)

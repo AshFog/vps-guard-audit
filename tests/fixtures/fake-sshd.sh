@@ -24,6 +24,7 @@ if [[ "$mode" == -T ]]; then
     $1 == "PermitRootLogin" { root=tolower($2) }
     $1 == "PasswordAuthentication" { password=tolower($2) }
     $1 == "KbdInteractiveAuthentication" { keyboard=tolower($2) }
+    $1 == "AllowTcpForwarding" { forwarding=tolower($2) }
     END {
       print "permitemptypasswords " (empty ? empty : "yes")
       print "maxauthtries " (tries ? tries : "6")
@@ -31,6 +32,7 @@ if [[ "$mode" == -T ]]; then
       print "permitrootlogin " (root ? root : "yes")
       print "passwordauthentication " (password ? password : "yes")
       print "kbdinteractiveauthentication " (keyboard ? keyboard : "yes")
+      print "allowtcpforwarding " (forwarding ? forwarding : "yes")
     }
   ' "$managed" 2>/dev/null
 fi

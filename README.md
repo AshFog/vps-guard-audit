@@ -1,6 +1,6 @@
 # VPS Guard Audit
 
-> v6.0.0 正在开发：在中文原生只读审计之后，增加面向 Ubuntu/Debian 常见 VPS 的 18 项可控加固。当前 10 项常规加固和 5 项连接敏感加固已开放；连接敏感动作必须通过控制台确认、备用管理员、延时回滚和第二 SSH 终端验证。
+> v6.0.0 正在开发：在中文原生只读审计之后，增加面向 Ubuntu/Debian 常见 VPS 的 18 项可控加固。当前 10 项常规加固和 8 项连接敏感加固均已接入；连接敏感动作必须通过用途确认、控制台确认、备用管理员、延时回滚和第二 SSH 终端验证。
 
 面向中文用户的 Ubuntu / Debian VPS 安全审计与可控加固工具。
 
@@ -40,9 +40,11 @@ vpsga plan
 
 在交互式终端直接运行 `vpsga`，检测完成后会显示“常规安全加固”和“连接敏感加固”菜单。非交互执行、定时任务和 CI 不会等待输入。连接敏感项目的说明入口位于 [docs/hardening](docs/hardening/index.md)。
 
-当前可执行项目为 `HARD-1001` 至 `HARD-1010`，以及连接敏感的 `HARD-2001`、`HARD-2002`。常规动作需输入 `APPLY`；禁止 root SSH 登录或密码登录还必须确认 VPS 控制台可用、选择具备安全公钥的非 root sudo 管理员，并从第二个独立 SSH 会话完成确认。未在5分钟内确认时，systemd timer 会自动恢复修改前的 SSH 配置。防火墙、Fail2ban、网络转发和服务类敏感项目仍不可执行。
+当前可执行项目为 `HARD-1001` 至 `HARD-1010` 和 `HARD-2001` 至 `HARD-2008`。常规动作需输入 `APPLY`；连接敏感动作还必须确认 VPS 控制台可用、选择具备安全公钥的非 root sudo 管理员，并从第二个独立 SSH 会话完成确认。未在5分钟内确认时，systemd timer 会自动恢复修改前的配置或服务状态。UFW 必须人工提交端口清单；关闭 SSH 转发、网络能力或候选服务还需要额外确认实际业务用途。
 
 执行连接敏感动作前，可以先运行 `vpsga connection-check`。它会检查当前 SSH 入口、具备安全公钥的非 root sudo 管理员，以及 systemd 延时回滚支持；VPS 控制台是否真正可用仍需用户人工确认。
+
+涉及 SSH 隧道、IP 转发、IPv6、Docker/VPN 或 CUPS/Avahi 服务时，先运行 `vpsga workload-plan` 查看只读用途清单。它只提供证据，不会替用户判断某项业务是否可以停止。
 
 安装完成后，以后在任意目录直接运行：
 
@@ -68,6 +70,9 @@ vpsga --help
 vpsga doctor
 vpsga update
 vpsga rollback
+vpsga connection-check
+vpsga firewall-plan
+vpsga workload-plan
 vpsga uninstall
 ```
 
