@@ -1,0 +1,77 @@
+name: v6 发行验收
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/v6-release-acceptance.yml'
+      - 'config/**'
+      - 'lib/**'
+      - 'tests/**'
+      - 'bootstrap.sh'
+      - 'install.sh'
+      - 'vps-guard-audit.sh'
+      - 'vpsga-manager.sh'
+  push:
+    branches:
+      - v6-hardening-foundation
+    tags:
+      - 'v6.0.0*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v6-release-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  distro-matrix:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Ubuntu 26.04
+            image: ubuntu:26.04
+          - name: Ubuntu 24.04
+            image: ubuntu:24.04
+          - name: Ubuntu 22.04
+            image: ubuntu:22.04
+          - name: Debian 13
+            image: debian:13
+          - name: Debian 12
+            image: debian:12
+          - name: Debian 11
+            image: debian:11
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          show-progress: false
+
+      - name: 准备真实 v5.0.0 升级基线
+        run: git archive --format=tar --output="$RUNNER_TEMP/vpsga-v5.0.0.tar" v5.0.0
+
+      - name: 18项动作、全新安装与升级验收
+        env:
+          DISTRO_IMAGE: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          expected_version="$(bash ./vps-guard-audit.sh --version)"
+          docker pull "$DISTRO_IMAGE"
+          docker run --rm --network none \
+            -e VPSGA_E2E_DISPOSABLE=YES \
+            -e VPSGA_EXPECTED_VERSION="$expected_version" \
+            -e VPSGA_V5_ARCHIVE=/tmp/vpsga-v5.0.0.tar \
+            -v "$GITHUB_WORKSPACE:/source:ro" \
+            -v "$RUNNER_TEMP/vpsga-v5.0.0.tar:/tmp/vpsga-v5.0.0.tar:ro" \
+            "$DISTRO_IMAGE" bash -c '
+              set -euo pipefail
+              mkdir -p /tmp/vpsga-source
+              cp -a /source/. /tmp/vpsga-source/
+              cd /tmp/vpsga-source
+              bash tests/run-hardening-suite.sh
+              bash tests/test-install-lifecycle.sh
+            '
