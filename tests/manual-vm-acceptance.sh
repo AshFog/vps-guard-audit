@@ -442,7 +442,7 @@ cmd_status() {
 }
 
 cmd_finish() {
-  local run_id="${1:-}" run_dir expected summary archive action path
+  local run_id="${1:-}" run_dir expected summary archive action path finished_at manifest_tmp
   require_root
   require_disposable_ack
   run_dir="$(load_run "$run_id")"
@@ -453,8 +453,7 @@ cmd_finish() {
   capture_command "$run_dir/final-doctor.txt" "$VPSGA_BIN" doctor \
     || die 69 "最终 vpsga doctor 未通过。"
 
-  printf 'finished_at=%s\n' "$(date -Is)" >"$run_dir/finished"
-  chmod 0600 -- "$run_dir/finished"
+  finished_at="$(date -Is)"
   summary="$run_dir/summary.md"
   {
     echo "# VPS Guard Audit v6 真实 VM 验收摘要"
@@ -463,7 +462,7 @@ cmd_finish() {
     printf -- '- 候选版本：%s\n' "$expected"
     printf -- '- 候选提交：%s\n' "$(read_meta "$run_dir" candidate_commit)"
     printf -- '- 开始时间：%s\n' "$(read_meta "$run_dir" started_at)"
-    printf -- '- 完成时间：%s\n' "$(sed -n 's/^finished_at=//p' "$run_dir/finished")"
+    printf -- '- 完成时间：%s\n' "$finished_at"
     echo '- 控制台：已人工确认'
     echo '- 快照：已记录（标识仅保存为 SHA-256）'
     echo
@@ -478,14 +477,18 @@ cmd_finish() {
   } >"$summary"
   chmod 0600 -- "$summary"
 
+  manifest_tmp="$(mktemp "$STATE_ROOT/.vm-acceptance-sha.XXXXXX")"
   (
     cd "$run_dir"
-    find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum >SHA256SUMS
-    chmod 0600 SHA256SUMS
-  )
+    find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum
+  ) >"$manifest_tmp"
+  chmod 0600 -- "$manifest_tmp"
+  mv -- "$manifest_tmp" "$run_dir/SHA256SUMS"
   archive="$STATE_ROOT/${run_id}-evidence.tar.gz"
   tar -C "$STATE_ROOT" -czf "$archive" "$run_id"
   chmod 0600 -- "$archive"
+  printf 'finished_at=%s\n' "$finished_at" >"$run_dir/finished"
+  chmod 0600 -- "$run_dir/finished"
   echo "真实 VM 验收完成。"
   echo "脱敏摘要：$summary"
   echo "私有证据包：$archive"

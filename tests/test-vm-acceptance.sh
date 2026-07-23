@@ -160,6 +160,9 @@ archive="$(sed -n 's/^私有证据包：//p' <<<"$finish_output")"
 [[ -f "$summary" && "$(stat -c %a "$summary")" == 600 ]]
 [[ -f "$archive" && "$(stat -c %a "$archive")" == 600 ]]
 [[ "$(grep -c '| HARD-200[1-8] | PASS | PASS |' "$summary")" -eq 8 ]]
-! grep -Eq '198\.51\.100|203\.0\.113|milo|2222|snap-before-test' "$summary"
+if grep -Eq '198\.51\.100|203\.0\.113|milo|2222|snap-before-test' "$summary"; then
+  echo 'the public summary contains sensitive test context' >&2
+  exit 1
+fi
 
 echo 'Manual VM acceptance helper tests passed.'
