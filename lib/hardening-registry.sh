@@ -10,7 +10,7 @@ hardening_registry_visit() {
   register_hardening_action "HARD-1002" "regular" "修复 SSH 密钥权限" \
     "收紧主机私钥和 authorized_keys 权限，不改变登录认证方式。" \
     "low" "keys.*.mode,keys.host_private" \
-    "~/.ssh/authorized_keys /etc/ssh/ssh_host_*_key" "yes" "HARD-1002"
+    "/root/.ssh/authorized_keys /home/*/.ssh/authorized_keys /etc/ssh/ssh_host_*_key" "yes" "HARD-1002"
   register_hardening_action "HARD-1003" "regular" "修复 sudoers 权限" \
     "先通过 visudo 验证，再修复 sudoers 及其片段的所有者和权限。" \
     "low" "sudo.mode" "/etc/sudoers /etc/sudoers.d/*" "yes" "HARD-1003"

@@ -364,7 +364,7 @@ hardening_systemd_unit_is_active() {
 }
 
 hardening_workload_plan() {
-  local context value unit load active enabled group output
+  local context value unit load active enabled group output line
   echo "业务用途检查（只读）"
   if context="$(connection_guard_current_context 2>/dev/null)"; then
     printf '  当前 SSH：%s:%s → %s:%s\n' \
@@ -387,7 +387,9 @@ hardening_workload_plan() {
     output="$(ip -brief link 2>/dev/null | awk '$1 ~ /^(docker|br-|veth|virbr|wg|tun|tap|tailscale|zt|cni|flannel)/ {print}' || true)"
     if [[ -n "$output" ]]; then
       echo "  检测到可能依赖转发的网络接口："
-      sed 's/^/    - /' <<<"$output"
+      while IFS= read -r line; do
+        printf '    - %s\n' "$line"
+      done <<<"$output"
     fi
   fi
   for unit in docker.service containerd.service 'wg-quick@*.service' openvpn.service tailscaled.service; do
@@ -410,7 +412,7 @@ hardening_workload_plan() {
 }
 
 hardening_firewall_plan() {
-  local context ssh_port listeners
+  local context ssh_port listeners listener
   context="$(connection_guard_current_context)" || return
   ssh_port="$(cut -f4 <<<"$context")"
   echo "防火墙端口计划（只读）"
@@ -427,7 +429,9 @@ hardening_firewall_plan() {
     ' | sort -t/ -k1,1n -k2,2)"
     if [[ -n "$listeners" ]]; then
       echo "  当前监听端口（仅供审核，不会自动全部放行）："
-      sed 's/^/    - /' <<<"$listeners"
+      while IFS= read -r listener; do
+        printf '    - %s\n' "$listener"
+      done <<<"$listeners"
     else
       echo "  未取得监听端口；请通过业务配置人工确认。"
     fi
@@ -438,7 +442,9 @@ hardening_firewall_plan() {
     listeners="$(docker ps --format '{{.Ports}}' 2>/dev/null | sed '/^[[:space:]]*$/d' || true)"
     if [[ -n "$listeners" ]]; then
       echo "  Docker 发布端口（请逐项确认）："
-      sed 's/^/    - /' <<<"$listeners"
+      while IFS= read -r listener; do
+        printf '    - %s\n' "$listener"
+      done <<<"$listeners"
       echo "    警告：Docker 发布端口可能绕过 UFW 的普通入站规则；本动作不会改写 DOCKER-USER 链。"
     fi
   fi
@@ -636,7 +642,7 @@ hardening_validate_2005() {
   context="$(connection_guard_current_context)" || return
   ssh_port="$(cut -f4 <<<"$context")"; path="$(hardening_fail2ban_path)"
   [[ -f "$path" && ! -L "$path" && "$(stat -c %a "$path")" == 600 ]] || return 1
-  grep -Eq "^[[:space:]]*port[[:space:]]*=[[:space:]]*$ssh_port[[:space:]]*$" "$path" || return 1
+  grep -Eq "^[[:space:]]*port[[:space:]]*=[[:space:]]*${ssh_port}[[:space:]]*$" "$path" || return 1
   hardening_systemctl_command is-active --quiet fail2ban || return 1
   if [[ -n "${VPSGA_TEST_FAIL2BAN_BIN:-}" ]]; then
     status="$(bash "$VPSGA_TEST_FAIL2BAN_BIN" status)" || return
@@ -838,7 +844,7 @@ hardening_validate_1009() {
   [[ -n "${VPSGA_SYSTEM_ROOT:-}" || "$(stat -c '%u:%g' "$path")" == '0:0' ]] || return 1
   while IFS='=' read -r key expected; do
     actual="$(hardening_sysctl_command -n "$key" 2>/dev/null)" || continue
-    [[ "$(grep -Ec "^[[:space:]]*${key//./\\.}[[:space:]]*=[[:space:]]*$expected[[:space:]]*$" "$path")" == 1 ]] || return 1
+    [[ "$(grep -Ec "^[[:space:]]*${key//./\\.}[[:space:]]*=[[:space:]]*${expected}[[:space:]]*$" "$path")" == 1 ]] || return 1
     [[ "$actual" == "$expected" ]] || return 1
   done < <(hardening_sysctl_pairs)
 }
@@ -959,7 +965,7 @@ hardening_validate_2007() {
   path="$(hardening_network_policy_path)"
   [[ -f "$path" && ! -L "$path" && "$(stat -c %a "$path")" == 600 ]] || return 1
   while IFS='=' read -r key expected; do
-    [[ "$(grep -Ec "^[[:space:]]*${key//./\\.}[[:space:]]*=[[:space:]]*$expected[[:space:]]*$" "$path")" == 1 ]] || return 1
+    [[ "$(grep -Ec "^[[:space:]]*${key//./\\.}[[:space:]]*=[[:space:]]*${expected}[[:space:]]*$" "$path")" == 1 ]] || return 1
     actual="$(hardening_sysctl_command -n "$key" 2>/dev/null)" || return
     [[ "$actual" == "$expected" ]] || return 1
   done <<<"$pairs"

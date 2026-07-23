@@ -249,7 +249,9 @@ connection_guard_cancel_rollback() {
 
 connection_guard_finalize_transaction() {
   local tx_id="$1" token="$2" status guard_dir
-  [[ "$HARDENING_TX_ID" == "$tx_id" && -n "$HARDENING_TX_DIR" ]] || return 75
+  # HARDENING_TX_ID and HARDENING_TX_DIR are initialized by hardening-transaction.sh.
+  # shellcheck disable=SC2153
+  [[ "${HARDENING_TX_ID:-}" == "$tx_id" && -n "${HARDENING_TX_DIR:-}" ]] || return 75
   status="$(sed -n 's/^status=//p' "$HARDENING_TX_DIR/status")"
   [[ "$status" == pending_confirmation ]] || return 65
   connection_guard_assert_confirmed "$token" || {

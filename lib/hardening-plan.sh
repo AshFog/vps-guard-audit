@@ -85,7 +85,7 @@ hardening_action_matches_findings() {
       fi
     done
   done
-  HARDENING_MATCHED_FINDINGS[$action_index]="$matched"
+  HARDENING_MATCHED_FINDINGS[action_index]="$matched"
   [[ -n "$matched" ]]
 }
 
@@ -156,7 +156,7 @@ print_hardening_plan() {
 }
 
 show_sensitive_hardening_menu() {
-  local answer i n admin console_ack token tx_id admins action specs group policy
+  local answer i n admin candidate_admin console_ack token tx_id admins action specs group policy
   while true; do
     echo
     echo "⚠ 连接敏感加固"
@@ -263,7 +263,9 @@ show_sensitive_hardening_menu() {
       continue
     fi
     echo "可用于第二终端验证的备用管理员："
-    sed 's/^/  - /' <<<"$admins"
+    while IFS= read -r candidate_admin; do
+      printf '  - %s\n' "$candidate_admin"
+    done <<<"$admins"
     printf '请输入要用于第二终端的管理员用户名：'
     IFS= read -r admin || return 0
     if ! grep -Fqx -- "$admin" <<<"$admins"; then
