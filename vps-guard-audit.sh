@@ -123,6 +123,69 @@ if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
   exit 77
 fi
 
+# Generic defaults. Optional config can extend or override these. Configuration
+# must be fully validated before any output directory, report, lock or runtime
+# temporary file is created.
+TRUSTED_LOGIN_IPS=""
+EXPECTED_UID0_USERS="root"
+CUSTOM_ALLOWED_TCP_PORTS=""
+CUSTOM_ALLOWED_UDP_PORTS=""
+
+load_config() {
+  local file="$1" line key value
+  local double_quoted_re='^([A-Z0-9_]+)="([^"]*)"$'
+  local single_quoted_re="^([A-Z0-9_]+)='([^']*)'$"
+  local unquoted_re='^([A-Z0-9_]+)=([A-Za-z0-9_.,:/ -]*)$'
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    if [[ "$line" =~ $double_quoted_re ]]; then
+      key="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
+    elif [[ "$line" =~ $single_quoted_re ]]; then
+      key="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
+    elif [[ "$line" =~ $unquoted_re ]]; then
+      key="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
+    else
+      echo "配置文件包含不受支持或不安全的语法：$line" >&2
+      exit 76
+    fi
+    case "$key" in
+      TRUSTED_LOGIN_IPS|EXPECTED_UID0_USERS|CUSTOM_ALLOWED_TCP_PORTS|CUSTOM_ALLOWED_UDP_PORTS|PROFILE|POLICY|DEPTH|MAX_LIST_ITEMS)
+        printf -v "$key" '%s' "$value"
+        ;;
+      *)
+        echo "配置文件包含未知字段：$key" >&2
+        exit 64
+        ;;
+    esac
+  done <"$file"
+}
+
+if [[ -n "$CONFIG_FILE" ]]; then
+  [[ ! -L "$CONFIG_FILE" ]] || { echo "拒绝加载符号链接配置文件：$CONFIG_FILE" >&2; exit 76; }
+  [[ -r "$CONFIG_FILE" ]] || { echo "无法读取配置文件：$CONFIG_FILE" >&2; exit 66; }
+  config_owner="$(stat -c %u "$CONFIG_FILE" 2>/dev/null || true)"
+  if find "$CONFIG_FILE" -maxdepth 0 -perm /022 -print -quit 2>/dev/null | grep -q .; then
+    echo "配置文件可被组用户或其他用户修改，拒绝以 root 权限加载：$CONFIG_FILE" >&2
+    exit 76
+  fi
+  if [[ "$config_owner" != 0 && "$config_owner" != "${SUDO_UID:-}" ]]; then
+    echo "配置文件所有者不是 root 或当前调用用户，拒绝加载：$CONFIG_FILE" >&2
+    exit 76
+  fi
+  load_config "$CONFIG_FILE"
+fi
+case "$PROFILE" in auto|general|web|docker|proxy|home|desktop|vps|server|container) ;; *) echo "配置文件中的 PROFILE 无效：$PROFILE" >&2; exit 64 ;; esac
+case "$PROFILE" in vps|server|container) PROFILE="general" ;; esac
+case "$POLICY" in baseline|strict) ;; *) echo "配置文件中的 POLICY 无效：$POLICY" >&2; exit 64 ;; esac
+case "$DEPTH" in quick|standard|deep) ;; *) echo "配置文件中的 DEPTH 无效：$DEPTH" >&2; exit 64 ;; esac
+[[ "$MAX_LIST_ITEMS" =~ ^[1-9][0-9]*$ ]] || { echo "MAX_LIST_ITEMS 必须是正整数" >&2; exit 64; }
+case "$DEPTH" in
+  quick) CHECK_UPDATES=0; CHECK_ROOTKITS=0; MAX_LIST_ITEMS=10 ;;
+  deep) CHECK_ROOTKITS=1 ;;
+esac
+
 declare -A ZH
 ZH[title]="VPS Guard Audit 完整报告"
 ZH[readonly]="检测过程只读：只有明确输入 APPLY 执行已开放加固项，或使用 --refresh-package-index 时才会修改系统"
@@ -217,66 +280,6 @@ trap cleanup_runtime EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
-
-# Generic defaults. Optional config can extend or override these.
-TRUSTED_LOGIN_IPS=""
-EXPECTED_UID0_USERS="root"
-CUSTOM_ALLOWED_TCP_PORTS=""
-CUSTOM_ALLOWED_UDP_PORTS=""
-
-load_config() {
-  local file="$1" line key value
-  local double_quoted_re='^([A-Z0-9_]+)="([^"]*)"$'
-  local single_quoted_re="^([A-Z0-9_]+)='([^']*)'$"
-  local unquoted_re='^([A-Z0-9_]+)=([A-Za-z0-9_.,:/ -]*)$'
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line="${line#"${line%%[![:space:]]*}"}"
-    line="${line%"${line##*[![:space:]]}"}"
-    [[ -z "$line" || "$line" == \#* ]] && continue
-    if [[ "$line" =~ $double_quoted_re ]]; then
-      key="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
-    elif [[ "$line" =~ $single_quoted_re ]]; then
-      key="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
-    elif [[ "$line" =~ $unquoted_re ]]; then
-      key="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
-    else
-      echo "配置文件包含不受支持或不安全的语法：$line" >&2
-      exit 76
-    fi
-    case "$key" in
-      TRUSTED_LOGIN_IPS|EXPECTED_UID0_USERS|CUSTOM_ALLOWED_TCP_PORTS|CUSTOM_ALLOWED_UDP_PORTS|PROFILE|POLICY|DEPTH|MAX_LIST_ITEMS)
-        printf -v "$key" '%s' "$value"
-        ;;
-      *)
-        echo "配置文件包含未知字段：$key" >&2
-        exit 64
-        ;;
-    esac
-  done <"$file"
-}
-
-if [[ -n "$CONFIG_FILE" ]]; then
-  [[ -r "$CONFIG_FILE" ]] || { echo "无法读取配置文件：$CONFIG_FILE" >&2; exit 66; }
-  [[ ! -L "$CONFIG_FILE" ]] || { echo "拒绝加载符号链接配置文件：$CONFIG_FILE" >&2; exit 76; }
-  config_owner="$(stat -c %u "$CONFIG_FILE" 2>/dev/null || true)"
-  if find "$CONFIG_FILE" -maxdepth 0 -perm /022 -print -quit 2>/dev/null | grep -q .; then
-    echo "配置文件可被组用户或其他用户修改，拒绝以 root 权限加载：$CONFIG_FILE" >&2
-    exit 76
-  fi
-  if [[ "$config_owner" != 0 && "$config_owner" != "${SUDO_UID:-}" ]]; then
-    echo "配置文件所有者不是 root 或当前调用用户，拒绝加载：$CONFIG_FILE" >&2
-    exit 76
-  fi
-  load_config "$CONFIG_FILE"
-fi
-case "$PROFILE" in auto|general|web|docker|proxy|home|desktop|vps|server|container) ;; *) echo "配置文件中的 PROFILE 无效：$PROFILE" >&2; exit 64 ;; esac
-case "$PROFILE" in vps|server|container) PROFILE="general" ;; esac
-case "$DEPTH" in quick|standard|deep) ;; *) echo "配置文件中的 DEPTH 无效：$DEPTH" >&2; exit 64 ;; esac
-case "$DEPTH" in
-  quick) CHECK_UPDATES=0; CHECK_ROOTKITS=0; MAX_LIST_ITEMS=10 ;;
-  deep) CHECK_ROOTKITS=1 ;;
-esac
-[[ "$MAX_LIST_ITEMS" =~ ^[1-9][0-9]*$ ]] || { echo "MAX_LIST_ITEMS 必须是正整数" >&2; exit 64; }
 
 json_escape() {
   local s=${1-}

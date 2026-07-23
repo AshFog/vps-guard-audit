@@ -19,7 +19,7 @@ jobs:
         run: |
           shellcheck -x -e SC1010,SC2005,SC2015,SC2034,SC2317 vps-guard-audit.sh vpsga-manager.sh bootstrap.sh install.sh
           shellcheck -x -e SC2009,SC2015,SC2034,SC2154 lib/*.sh
-          shellcheck -x tests/run-hardening-suite.sh tests/test-hardening-filesystem.sh tests/test-install-lifecycle.sh tests/manual-vm-acceptance.sh tests/test-vm-acceptance.sh
+          shellcheck -x tests/run-hardening-suite.sh tests/test-audit-config.sh tests/test-hardening-filesystem.sh tests/test-install-lifecycle.sh tests/manual-vm-acceptance.sh tests/test-vm-acceptance.sh
 
       - name: 中文定位和版本
         run: |

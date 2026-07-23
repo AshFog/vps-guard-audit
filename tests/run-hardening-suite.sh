@@ -36,6 +36,7 @@ for action in "${expected_actions[@]}"; do
 done
 
 tests=(
+  tests/test-audit-config.sh
   tests/test-hardening-filesystem.sh
   tests/test-hardening-ssh.sh
   tests/test-hardening-system.sh
