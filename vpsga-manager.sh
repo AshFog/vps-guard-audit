@@ -5,9 +5,14 @@ INSTALL_ROOT="/usr/local/lib/vps-guard-audit"
 CURRENT="$INSTALL_ROOT/current"
 ARCHIVE_URL="https://github.com/AshFog/vps-guard-audit/archive/refs/heads/main.tar.gz"
 VPSGA_BIN="/usr/local/bin/vpsga"
+HARDENING_STATE_ROOT="${VPSGA_HARDENING_STATE_ROOT:-/var/lib/vps-guard-audit/hardening}"
 
 REQUIRED_MODULES=(
   check-registry.sh
+  hardening-registry.sh
+  hardening-transaction.sh
+  hardening-actions.sh
+  hardening-plan.sh
   audit-platform.sh
   audit-access.sh
   audit-system.sh
@@ -176,9 +181,73 @@ cmd_update() {
   echo "更新完成，当前版本：$("$VPSGA_BIN" --version)"
 }
 
+cmd_rollback() {
+  need_root rollback "$@"
+  local tx_id="${1:-}" tx_dir status action answer manager_dir
+  if [[ -z "$tx_id" ]]; then
+    echo "可回滚的加固事务（最近20项）："
+    if [[ ! -d "$HARDENING_STATE_ROOT" ]]; then
+      echo "  暂无加固事务。"
+      return 0
+    fi
+    find "$HARDENING_STATE_ROOT" -mindepth 2 -maxdepth 2 -type f -name status -print 2>/dev/null \
+      | sort -r | head -n 20 | while IFS= read -r status; do
+          tx_dir="${status%/status}"
+          printf '  %s  %s  %s\n' "${tx_dir##*/}" \
+            "$(sed -n 's/^status=//p' "$status")" "$(sed -n 's/^action=//p' "$status")"
+        done
+    echo "使用方法：vpsga rollback <事务编号>"
+    return 0
+  fi
+  [[ "$tx_id" =~ ^[0-9]{8}T[0-9]{6}Z-HARD-[0-9]{4}-[0-9]+-[0-9]+$ ]] || {
+    echo "事务编号格式无效：$tx_id" >&2
+    exit 64
+  }
+  [[ -d "$HARDENING_STATE_ROOT" && ! -L "$HARDENING_STATE_ROOT" ]] || {
+    echo "加固事务目录不存在或不安全。" >&2
+    exit 66
+  }
+  tx_dir="$HARDENING_STATE_ROOT/$tx_id"
+  [[ -d "$tx_dir" && ! -L "$tx_dir" && -f "$tx_dir/status" && -f "$tx_dir/manifest.tsv" ]] || {
+    echo "没有找到完整事务：$tx_id" >&2
+    exit 66
+  }
+  [[ "$(stat -c %u "$tx_dir")" == 0 ]] || { echo "事务目录不属于 root，拒绝恢复。" >&2; exit 76; }
+  if find "$tx_dir" -xdev -type f -perm /022 -print -quit 2>/dev/null | grep -q .; then
+    echo "事务文件可被其他用户修改，拒绝恢复。" >&2
+    exit 76
+  fi
+  status="$(sed -n 's/^status=//p' "$tx_dir/status")"
+  action="$(sed -n 's/^action=//p' "$tx_dir/status")"
+  [[ "$status" == committed && "$action" =~ ^HARD-[0-9]{4}$ ]] || {
+    echo "只有状态为 committed 的完整事务可以回滚；当前状态：${status:-未知}" >&2
+    exit 65
+  }
+  [[ -r /dev/tty && -w /dev/tty ]] || { echo "回滚需要交互式终端。" >&2; exit 65; }
+  echo "准备回滚 $tx_id（$action）。这会恢复该动作执行前的文件和权限。" >/dev/tty
+  printf '输入 ROLLBACK 确认：' >/dev/tty
+  IFS= read -r answer </dev/tty
+  [[ "$answer" == ROLLBACK ]] || { echo "已取消。"; return 0; }
+
+  manager_dir="$(cd "$(dirname "$0")" && pwd -P)"
+  # shellcheck source=lib/hardening-transaction.sh
+  source "$manager_dir/lib/hardening-transaction.sh"
+  HARDENING_TX_DIR="$tx_dir"
+  HARDENING_TX_ID="$tx_id"
+  HARDENING_TX_ACTION="$action"
+  HARDENING_TX_MANIFEST="$tx_dir/manifest.tsv"
+  if hardening_tx_rollback "用户手动回滚"; then
+    echo "事务已回滚：$tx_id"
+    echo "请立即重新运行 vpsga 复检。"
+  else
+    echo "事务回滚不完整，请保留当前连接并检查：$tx_dir" >&2
+    exit 74
+  fi
+}
+
 cmd_uninstall() {
   need_root uninstall
-  local answer keep_history="yes" history_tmp=""
+  local answer keep_state="yes" state_tmp=""
   if [[ ! -r /dev/tty || ! -w /dev/tty ]]; then
     echo "卸载需要交互式终端。" >&2
     exit 65
@@ -188,26 +257,25 @@ cmd_uninstall() {
   IFS= read -r answer </dev/tty
   [[ "$answer" == UNINSTALL ]] || { echo "已取消。"; exit 0; }
 
-  if [[ -d /var/lib/vps-guard-audit/history ]]; then
-    printf "是否保留检测历史？[Y/n]：" >/dev/tty
+  if [[ -d /var/lib/vps-guard-audit ]]; then
+    printf "是否保留检测历史和加固回滚记录？[Y/n]：" >/dev/tty
     IFS= read -r answer </dev/tty
-    case "$answer" in n|N|no|NO) keep_history="no" ;; esac
-    if [[ "$keep_history" == yes ]]; then
-      history_tmp="$(mktemp -d)"
-      cp -a /var/lib/vps-guard-audit/history "$history_tmp/"
+    case "$answer" in n|N|no|NO) keep_state="no" ;; esac
+    if [[ "$keep_state" == yes ]]; then
+      state_tmp="$(mktemp -d)"
+      cp -a /var/lib/vps-guard-audit "$state_tmp/"
     fi
   fi
 
   rm -f /usr/local/bin/vpsga /usr/local/sbin/vps-guard-audit
   rm -rf "$INSTALL_ROOT"
-  if [[ "$keep_history" == yes && -n "$history_tmp" && -d "$history_tmp/history" ]]; then
-    install -d -m 0700 /var/lib/vps-guard-audit
-    cp -a "$history_tmp/history" /var/lib/vps-guard-audit/history
-    rm -rf "$history_tmp"
-    echo "程序已删除，历史记录保留在 /var/lib/vps-guard-audit/history"
+  if [[ "$keep_state" == yes && -n "$state_tmp" && -d "$state_tmp/vps-guard-audit" ]]; then
+    cp -a "$state_tmp/vps-guard-audit" /var/lib/vps-guard-audit
+    rm -rf "$state_tmp"
+    echo "程序已删除，检测历史和加固回滚记录保留在 /var/lib/vps-guard-audit"
   else
     rm -rf /var/lib/vps-guard-audit
-    [[ -n "$history_tmp" ]] && rm -rf "$history_tmp"
+    [[ -n "$state_tmp" ]] && rm -rf "$state_tmp"
     echo "VPS Guard Audit 已卸载。"
   fi
 }
@@ -217,6 +285,8 @@ usage() {
 VPS Guard Audit 管理命令：
   vpsga doctor                 检查程序安装状态和完整性
   vpsga update                 安装上游最新版本
+  vpsga rollback               列出最近的加固事务
+  vpsga rollback <事务编号>    交互确认后恢复该事务
   vpsga uninstall              卸载程序
 EOF_USAGE
 }
@@ -224,6 +294,7 @@ EOF_USAGE
 case "${1:-}" in
   doctor) shift; cmd_doctor "$@" ;;
   update) shift; cmd_update "$@" ;;
+  rollback) shift; cmd_rollback "$@" ;;
   uninstall) shift; cmd_uninstall "$@" ;;
   -h|--help|help|"") usage ;;
   *) echo "未知管理命令：$1" >&2; usage >&2; exit 64 ;;

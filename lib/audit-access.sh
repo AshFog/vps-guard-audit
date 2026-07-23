@@ -121,6 +121,18 @@ audit_access() {
     else
       record SKIP sudo.syntax "未安装 visudo，跳过 sudoers 语法检查" "visudo is unavailable; sudoers syntax check skipped"
     fi
+    sudo_mode_problem=""
+    if [[ -e /etc/sudoers ]]; then
+      sudo_mode="$(stat -c '%a %u:%g' /etc/sudoers 2>/dev/null || true)"
+      [[ "$sudo_mode" == "440 0:0" ]] || sudo_mode_problem="/etc/sudoers=$sudo_mode"
+    fi
+    if [[ -d /etc/sudoers.d ]]; then
+      sudo_bad_files="$(find /etc/sudoers.d -xdev -type f \( -perm /133 -o ! -user root -o ! -group root \) -print 2>/dev/null | trim_lines || true)"
+      [[ -z "$sudo_bad_files" ]] || sudo_mode_problem+="${sudo_mode_problem:+; }sudoers.d 存在权限或所有者异常"
+    fi
+    [[ -z "$sudo_mode_problem" ]] \
+      && record PASS sudo.mode "sudoers 文件权限和所有者合理" "sudoers ownership and permissions are acceptable" \
+      || record WARN sudo.mode "sudoers 文件权限或所有者需要修复" "sudoers ownership or permissions require remediation" "$sudo_mode_problem"
     EMPTY_PW="$(awk -F: '($2==""){print $1}' /etc/shadow 2>/dev/null | xargs)"
     [[ -z "$EMPTY_PW" ]] \
       && record PASS users.empty "未发现空密码账户" "No accounts have empty password hashes" \
@@ -132,12 +144,35 @@ audit_access() {
       count="$(grep -cEv '^[[:space:]]*(#|$)' "$key" 2>/dev/null || true)"
       perms="$(stat -c '%a %U:%G' "$key" 2>/dev/null || true)"
       record INFO "keys.$user" "$user 的 authorized_keys" "$user authorized_keys" "$count 个密钥，$perms"
+      key_mode="$(stat -c '%a %u' "$key" 2>/dev/null || true)"
+      ssh_dir_mode="$(stat -c '%a %u' "$home/.ssh" 2>/dev/null || true)"
+      if [[ "$key_mode" == "600 $uid" && "$ssh_dir_mode" == "700 $uid" ]]; then
+        record PASS "keys.$user.mode" "$user 的 SSH 密钥目录权限合理" "$user SSH key permissions are acceptable"
+      else
+        record WARN "keys.$user.mode" "$user 的 SSH 密钥目录权限需要修复" "$user SSH key permissions require remediation" \
+          "authorized_keys=$key_mode; .ssh=$ssh_dir_mode"
+      fi
       if [[ "$FULL_IDENTIFIERS" -eq 1 ]]; then
         ssh-keygen -lf "$key" 2>/dev/null || record WARN "keys.$user.invalid" "$user 的密钥文件无法解析" "$user authorized_keys contains an unparsable key"
       else
         awk '!/^[[:space:]]*(#|$)/ {print $1}' "$key" 2>/dev/null | sort | uniq -c | sed 's/^/key type: /' || true
       fi
     done </etc/passwd
+
+    host_private_keys="$(find /etc/ssh -maxdepth 1 -type f -name 'ssh_host_*_key' -print 2>/dev/null || true)"
+    if [[ -z "$host_private_keys" ]]; then
+      record SKIP keys.host_private "未找到 SSH 主机私钥" "No SSH host private keys were found"
+    else
+      bad_host_private_keys=""
+      while IFS= read -r host_key; do
+        [[ -n "$host_key" ]] || continue
+        host_key_state="$(stat -c '%a %u:%g' "$host_key" 2>/dev/null || true)"
+        [[ "$host_key_state" == "600 0:0" ]] || bad_host_private_keys+="${bad_host_private_keys:+; }$host_key=$host_key_state"
+      done <<<"$host_private_keys"
+      [[ -z "$bad_host_private_keys" ]] \
+        && record PASS keys.host_private "SSH 主机私钥权限和所有者合理" "SSH host private-key ownership and permissions are acceptable" \
+        || record WARN keys.host_private "SSH 主机私钥权限或所有者需要修复" "SSH host private-key ownership or permissions require remediation" "$bad_host_private_keys"
+    fi
 
     section "$(t logins)"
     LOGIN_SOURCE=""

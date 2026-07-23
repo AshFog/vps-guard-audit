@@ -2,15 +2,17 @@
 # VPS Guard Audit
 # 面向中文用户的 Ubuntu / Debian VPS 只读安全审计工具。
 # Supported: Ubuntu 26.04/24.04/22.04 LTS and Debian 13/12/11.
-# Version: 5.0.0
+# Version: 6.0.0-dev.1
 
 set -uo pipefail
 IFS=$'\n\t'
 export LC_ALL=C LANG=C
 umask 077
 
-VERSION="5.0.0"
+VERSION="6.0.0-dev.1"
 SCHEMA_VERSION="2.0"
+COMMAND="audit"
+AFTER_AUDIT="auto"
 OUTPUT_DIR="${PWD}"
 FORMAT="both"
 QUIET=0
@@ -51,6 +53,7 @@ usage() {
   cat <<'EOF_USAGE'
 用法：
   vpsga [options]
+  vpsga plan [options]         检测后生成中文加固计划（只读）
 
 首次安装：
   curl -fsSL https://raw.githubusercontent.com/AshFog/vps-guard-audit/main/bootstrap.sh | bash
@@ -68,11 +71,18 @@ usage() {
   --full-identifiers           完整显示标识符
   --rootkit-check              运行已安装的 Rootkit 扫描器
   --no-history                 不保存本次比较状态
+  --after-audit auto|none|plan|menu
+                               检测后的操作；auto 仅在交互终端显示菜单
   --quiet                      不在终端显示检测过程
   -h, --help                   显示帮助
   -v, --version                显示版本
 EOF_USAGE
 }
+
+if [[ "${1-}" == audit || "${1-}" == plan ]]; then
+  COMMAND="$1"
+  shift
+fi
 
 while (($#)); do
   case "$1" in
@@ -88,6 +98,7 @@ while (($#)); do
     --full-identifiers) FULL_IDENTIFIERS=1; shift ;;
     --rootkit-check) CHECK_ROOTKITS=1; shift ;;
     --no-history) HISTORY_ENABLED=0; shift ;;
+    --after-audit) AFTER_AUDIT="${2:?缺少检测后操作}"; shift 2 ;;
     --quiet) QUIET=1; shift ;;
     -h|--help) usage; exit 0 ;;
     -v|--version) echo "$VERSION"; exit 0 ;;
@@ -99,6 +110,7 @@ case "$FORMAT" in text|json|both) ;; *) echo "无效报告格式：$FORMAT" >&2;
 case "$PROFILE" in auto|general|web|docker|proxy|home|desktop|vps|server|container) ;; *) echo "无效配置档案：$PROFILE" >&2; exit 64 ;; esac
 case "$DEPTH" in quick|standard|deep) ;; *) echo "无效检测深度：$DEPTH" >&2; exit 64 ;; esac
 case "$POLICY" in baseline|strict) ;; *) echo "无效安全策略：$POLICY" >&2; exit 64 ;; esac
+case "$AFTER_AUDIT" in auto|none|plan|menu) ;; *) echo "无效检测后操作：$AFTER_AUDIT" >&2; exit 64 ;; esac
 [[ "$LOGIN_LINES" =~ ^[0-9]+$ ]] || { echo "--login-lines 必须是整数" >&2; exit 64; }
 case "$PROFILE" in vps|server|container) PROFILE="general" ;; esac
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
@@ -185,6 +197,11 @@ set +o noclobber
 TMP_DIR="$(mktemp -d)" || { echo "无法创建临时目录" >&2; exec 3>&- 4>&- 5>&-; rm -f -- "$FULL_REPORT" "$JSON_REPORT" "$AI_REPORT" "$LOCK_DIR/pid"; rmdir -- "$LOCK_DIR" 2>/dev/null || true; exit 69; }
 MODULE_TMP_DIR=""
 cleanup_runtime() {
+  if [[ -n "${HARDENING_TX_DIR:-}" && -f "${HARDENING_TX_DIR}/status" ]] \
+    && grep -q '^status=running$' "${HARDENING_TX_DIR}/status" 2>/dev/null \
+    && declare -F hardening_tx_rollback >/dev/null 2>&1; then
+    hardening_tx_rollback "程序中断，退出时自动回滚" >/dev/null 2>&1 || true
+  fi
   rm -rf -- "$TMP_DIR"
   [[ -n "$MODULE_TMP_DIR" ]] && rm -rf -- "$MODULE_TMP_DIR"
   if [[ -d "$LOCK_DIR" && ! -L "$LOCK_DIR" && "$(cat "$LOCK_DIR/pid" 2>/dev/null || true)" == "$$" ]]; then
@@ -404,7 +421,7 @@ load_audit_modules() {
     tmp_lib="$(mktemp -d)"
     MODULE_TMP_DIR="$tmp_lib"
     base_url="${VPS_GUARD_BASE_URL:-https://raw.githubusercontent.com/AshFog/vps-guard-audit/main/lib}"
-    for module in check-registry.sh audit-platform.sh audit-access.sh audit-system.sh audit-containers.sh report-guidance-zh.sh report-guidance.sh report-output.sh audit-summary.sh; do
+    for module in check-registry.sh hardening-registry.sh hardening-transaction.sh hardening-actions.sh hardening-plan.sh audit-platform.sh audit-access.sh audit-system.sh audit-containers.sh report-guidance-zh.sh report-guidance.sh report-output.sh audit-summary.sh; do
       curl -fsSL "$base_url/$module" -o "$tmp_lib/$module" || {
         echo "下载模块失败：$module" >&2
         exit 69
@@ -430,7 +447,7 @@ load_audit_modules() {
       exit 76
     fi
   fi
-  for module in check-registry.sh audit-platform.sh audit-access.sh audit-system.sh audit-containers.sh report-guidance-zh.sh report-guidance.sh report-output.sh audit-summary.sh; do
+  for module in check-registry.sh hardening-registry.sh hardening-transaction.sh hardening-actions.sh hardening-plan.sh audit-platform.sh audit-access.sh audit-system.sh audit-containers.sh report-guidance-zh.sh report-guidance.sh report-output.sh audit-summary.sh; do
     [[ -f "$lib_dir/$module" && ! -L "$lib_dir/$module" ]] || {
       echo "检测模块缺失或是符号链接：$lib_dir/$module" >&2
       exit 76
@@ -517,6 +534,19 @@ echo "$(t reports):"
 [[ -f "$AI_REPORT" ]] && echo "  AI 脱敏报告：$AI_REPORT"
 [[ -f "$JSON_REPORT" ]] && echo "  JSON: $JSON_REPORT"
 echo "============================================================"
+
+if [[ "$COMMAND" == plan || "$AFTER_AUDIT" == plan ]]; then
+  print_hardening_plan
+elif [[ "$AFTER_AUDIT" == menu ]]; then
+  if [[ -t 0 && -t 1 ]]; then
+    show_post_audit_menu
+  else
+    echo "--after-audit menu 需要交互式终端；已改为输出只读加固计划。" >&2
+    print_hardening_plan
+  fi
+elif [[ "$AFTER_AUDIT" == auto && -t 0 && -t 1 ]]; then
+  show_post_audit_menu
+fi
 
 if ((FAIL > 0)); then exit 2
 elif ((WARN > 0)); then exit 1

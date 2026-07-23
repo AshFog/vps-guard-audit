@@ -19,6 +19,10 @@ PREVIOUS_LINK_TARGET=""
 
 REQUIRED_MODULES=(
   check-registry.sh
+  hardening-registry.sh
+  hardening-transaction.sh
+  hardening-actions.sh
+  hardening-plan.sh
   audit-platform.sh
   audit-access.sh
   audit-system.sh
@@ -147,7 +151,7 @@ MANAGER="$CURRENT/vpsga-manager.sh"
 }
 
 case "${1-}" in
-  doctor|update|uninstall)
+  doctor|update|rollback|uninstall)
     exec "$MANAGER" "$@"
     ;;
   -h|--help|-v|--version)

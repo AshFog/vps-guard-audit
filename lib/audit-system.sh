@@ -124,6 +124,31 @@ audit_system() {
       record SKIP sysctl.depth "快速检查跳过内核参数基线" "Kernel baseline skipped in quick mode"
     fi
 
+    if [[ "$DEPTH" != quick ]]; then
+      core_limit_rule="$(grep -RhsE '^[[:space:]]*\*[[:space:]]+hard[[:space:]]+core[[:space:]]+0([[:space:]]|$)' \
+        /etc/security/limits.conf /etc/security/limits.d 2>/dev/null | head -n1 || true)"
+      [[ -n "$core_limit_rule" ]] \
+        && record PASS coredump.unlimited "普通用户 Core Dump 已设置硬限制" "Core dumps have a hard limit for regular users" "$core_limit_rule" \
+        || record WARN coredump.unlimited "未确认普通用户 Core Dump 硬限制" "No hard core-dump limit was confirmed for regular users" "建议设置 * hard core 0"
+
+      if command -v systemd-coredump >/dev/null 2>&1 \
+        || [[ -x /usr/lib/systemd/systemd-coredump || -d /etc/systemd/coredump.conf.d || -f /etc/systemd/coredump.conf ]]; then
+        coredump_config="$(systemd-analyze cat-config systemd/coredump.conf 2>/dev/null || true)"
+        coredump_storage="$(awk -F= '/^[[:space:]]*Storage=/{gsub(/[[:space:]]/,"",$2); value=tolower($2)} END{print value}' <<<"$coredump_config")"
+        coredump_size="$(awk -F= '/^[[:space:]]*ProcessSizeMax=/{gsub(/[[:space:]]/,"",$2); value=tolower($2)} END{print value}' <<<"$coredump_config")"
+        if [[ "$coredump_storage" == none && "$coredump_size" == 0 ]]; then
+          record PASS coredump.enabled "systemd Core Dump 存储已关闭" "systemd core-dump storage is disabled"
+        else
+          record WARN coredump.enabled "systemd 仍可能保存 Core Dump" "systemd may still store core dumps" \
+            "Storage=${coredump_storage:-默认值}; ProcessSizeMax=${coredump_size:-默认值}"
+        fi
+      else
+        record SKIP coredump.enabled "系统未使用 systemd-coredump" "systemd-coredump is not in use"
+      fi
+    else
+      record SKIP coredump.depth "快速检查跳过 Core Dump 配置" "Core-dump configuration is skipped in quick mode"
+    fi
+
     if [[ "$DEPTH" == deep ]]; then
     section "$(t files)"
     for item in "/etc/passwd:644" "/etc/group:644" "/etc/shadow:600,640" "/etc/gshadow:600,640" "/etc/ssh/sshd_config:600,644"; do

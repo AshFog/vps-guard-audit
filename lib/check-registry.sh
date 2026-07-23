@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
-# v5 检查注册表：标题可以变化，稳定编号不得变化。
+# 检查注册表：标题可以变化，稳定编号不得变化。
 
 registry_lookup() {
   local legacy_id="$1"
@@ -41,7 +41,7 @@ registry_lookup() {
     f2b.*) CHECK_ID="SSH-4101"; CHECK_CATEGORY="SSH"; CHECK_PREREQUISITE="SSH 服务存在"; CHECK_DEPTH="standard" ;;
     users.uid0) CHECK_ID="USR-5001"; CHECK_CATEGORY="账户"; CHECK_RISK="high" ;;
     users.empty) CHECK_ID="USR-5002"; CHECK_CATEGORY="账户"; CHECK_RISK="high" ;;
-    sudo.syntax) CHECK_ID="USR-5003"; CHECK_CATEGORY="账户"; CHECK_REQUIRED_COMMANDS="visudo" ;;
+    sudo.syntax|sudo.mode) CHECK_ID="USR-5003"; CHECK_CATEGORY="账户"; CHECK_REQUIRED_COMMANDS="visudo" ;;
     keys.*) CHECK_ID="USR-5004"; CHECK_CATEGORY="账户"; CHECK_DEPTH="standard" ;;
     login.*) CHECK_ID="USR-5005"; CHECK_CATEGORY="账户"; CHECK_PREREQUISITE="登录记录可读"; CHECK_DEPTH="standard" ;;
     systemd.failed) CHECK_ID="SYS-1101"; CHECK_CATEGORY="服务"; CHECK_REQUIRED_COMMANDS="systemctl" ;;
@@ -52,6 +52,7 @@ registry_lookup() {
     pkg.reboot|pkg.kernel_running) CHECK_ID="PKG-6004"; CHECK_CATEGORY="软件包" ;;
     pkg.dpkg|pkg.index|pkg.index.refresh|pkg.index.age|pkg.held) CHECK_ID="PKG-6005"; CHECK_CATEGORY="软件包"; CHECK_DEPTH="standard" ;;
     sysctl.*) CHECK_ID="SYS-1201"; CHECK_CATEGORY="内核"; CHECK_REQUIRED_COMMANDS="sysctl"; CHECK_DEPTH="standard" ;;
+    coredump.*) CHECK_ID="SYS-1202"; CHECK_CATEGORY="内核"; CHECK_DEPTH="standard" ;;
     perm.*|world.*|suid.unusual) CHECK_ID="SYS-1301"; CHECK_CATEGORY="文件权限"; CHECK_DEPTH="deep" ;;
     docker.published) CHECK_ID="CTR-7001"; CHECK_CATEGORY="容器"; CHECK_REQUIRED_COMMANDS="docker"; CHECK_PREREQUISITE="Docker 正在运行" ;;
     docker.priv) CHECK_ID="CTR-7002"; CHECK_CATEGORY="容器"; CHECK_REQUIRED_COMMANDS="docker"; CHECK_DEPTH="standard" ;;

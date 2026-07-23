@@ -1,4 +1,4 @@
-name: v5 检查
+name: v6 开发检查
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
 
       - name: 中文定位和版本
         run: |
-          test "$(bash ./vps-guard-audit.sh --version)" = "5.0.0"
+          test "$(bash ./vps-guard-audit.sh --version)" = "6.0.0-dev.1"
           help_output="$(bash ./vps-guard-audit.sh --help)"
           grep -q '用法' <<<"$help_output"
           grep -q -- '--depth quick|standard|deep' <<<"$help_output"
@@ -39,7 +39,63 @@ jobs:
           set -e
           test "$rc" -ge 0 -a "$rc" -le 2
           report="$(find "$RUNNER_TEMP/json" -maxdepth 1 -name 'vpsga-*.json' -print -quit)"
-          jq -e '.version == "5.0.0" and .schema_version == "2.0" and .language == "zh-CN" and .depth == "quick" and (.findings | type == "array") and (.findings[0].test_id | test("^[A-Z]+-[0-9]{4}$")) and (.findings[0].evidence | type == "array")' "$report"
+          jq -e '.version == "6.0.0-dev.1" and .schema_version == "2.0" and .language == "zh-CN" and .depth == "quick" and (.findings | type == "array") and (.findings[0].test_id | test("^[A-Z]+-[0-9]{4}$")) and (.findings[0].evidence | type == "array")' "$report"
+
+      - name: 18 项加固注册表与只读计划
+        run: |
+          test "$(grep -c 'register_hardening_action "HARD-' lib/hardening-registry.sh)" -eq 18
+          test "$(grep -c '"regular"' lib/hardening-registry.sh)" -eq 10
+          test "$(grep -c '"sensitive"' lib/hardening-registry.sh)" -eq 8
+          mkdir -p "$RUNNER_TEMP/hardening-plan"
+          set +e
+          sudo bash ./vps-guard-audit.sh plan --depth quick --no-history --no-update-check --format json --output-dir "$RUNNER_TEMP/hardening-plan" --quiet >"$RUNNER_TEMP/plan.txt"
+          rc=$?
+          set -e
+          test "$rc" -ge 0 -a "$rc" -le 2
+          grep -q '中文加固计划（只读预览）' "$RUNNER_TEMP/plan.txt"
+          grep -q '当前仅 HARD-1001 至 HARD-1004' "$RUNNER_TEMP/plan.txt"
+          bash -c '
+            set -uo pipefail
+            declare -a FINDING_LEGACY_IDS=(ssh.password ssh.tries fw.none pkg.unattended)
+            declare -a FINDING_LEVELS=(FAIL WARN FAIL WARN)
+            declare -a FINDING_IDS=(SSH-4001 SSH-4005 FW-3001 PKG-6003)
+            source lib/hardening-registry.sh
+            source lib/hardening-plan.sh
+            collect_applicable_hardening
+            test "${#APPLICABLE_REGULAR[@]}" -eq 2
+            test "${#APPLICABLE_SENSITIVE[@]}" -eq 2
+          '
+
+      - name: 加固事务、验证与自动回滚
+        run: |
+          sudo env RUNNER_TEMP="$RUNNER_TEMP" bash -c '
+            set -euo pipefail
+            root="$RUNNER_TEMP/hardening-root"
+            state="$RUNNER_TEMP/hardening-state"
+            mkdir -p "$root/etc/ssh" "$root/etc/sudoers.d" "$root/etc/cron.d"
+            printf "root:x:0:0:root:/root:/bin/bash\n" >"$root/etc/passwd"
+            printf "root:x:0:\n" >"$root/etc/group"
+            printf "root:*:1:0:99999:7:::\n" >"$root/etc/shadow"
+            printf "root:*::\n" >"$root/etc/gshadow"
+            chmod 0666 "$root/etc/passwd" "$root/etc/group"
+            chmod 0644 "$root/etc/shadow" "$root/etc/gshadow"
+            export VPSGA_SYSTEM_ROOT="$root" VPSGA_HARDENING_STATE_ROOT="$state"
+            source lib/hardening-transaction.sh
+            source lib/hardening-actions.sh
+            execute_hardening_action HARD-1001
+            test "$(stat -c %a "$root/etc/passwd")" = 644
+            test "$(stat -c %a "$root/etc/shadow")" = 640
+            tx="$(find "$state" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+            grep -q "status=committed" "$tx/status"
+
+            chmod 0666 "$root/etc/passwd"
+            hardening_tx_begin HARD-1001
+            hardening_tx_capture "$root/etc/passwd"
+            chmod 0600 "$root/etc/passwd"
+            hardening_tx_rollback "测试回滚"
+            test "$(stat -c %a "$root/etc/passwd")" = 666
+            grep -q "status=rolled_back" "$HARDENING_TX_DIR/status"
+          '
 
       - name: 中文报告与历史比较
         run: |
@@ -77,7 +133,7 @@ jobs:
           test -x /usr/local/bin/vpsga
           test -L /usr/local/lib/vps-guard-audit/current
           test -f /usr/local/lib/vps-guard-audit/current/MANIFEST.sha256
-          test "$(/usr/local/bin/vpsga --version)" = "5.0.0"
+          test "$(/usr/local/bin/vpsga --version)" = "6.0.0-dev.1"
           /usr/local/bin/vpsga doctor
 
       - name: 旧 current 目录迁移
@@ -89,7 +145,7 @@ jobs:
           sudo cp lib/*.sh /usr/local/lib/vps-guard-audit/current/lib/
           sudo bash ./install.sh
           test -L /usr/local/lib/vps-guard-audit/current
-          test "$(readlink -f /usr/local/lib/vps-guard-audit/current)" = "/usr/local/lib/vps-guard-audit/releases/5.0.0"
+          test "$(readlink -f /usr/local/lib/vps-guard-audit/current)" = "/usr/local/lib/vps-guard-audit/releases/6.0.0-dev.1"
           /usr/local/bin/vpsga doctor
 
       - name: 非 root 运行与报告所有权
